@@ -37,6 +37,9 @@ utilities/image-crop-tool/affected_images.log
 utilities/hue-shift-tool/input/*
 utilities/hue-shift-tool/output/*
 
+utilities/perk-sheet-generator/input/*
+utilities/perk-sheet-generator/output/*
+
 public/BalancingPresets/Autobalance/*
 autobalance-info/*
 
