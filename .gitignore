@@ -40,6 +40,9 @@ utilities/hue-shift-tool/output/*
 utilities/perk-sheet-generator/input/*
 utilities/perk-sheet-generator/output/*
 
+utilities/item-sheet-generator/input/*
+utilities/item-sheet-generator/output/*
+
 public/BalancingPresets/Autobalance/*
 autobalance-info/*
 

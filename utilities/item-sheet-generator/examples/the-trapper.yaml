@@ -1,0 +1,36 @@
+killer: The Trapper
+
+# Top-level default for any item type NOT listed under `items:` below.
+# deny = none of that type's variants/add-ons are allowed.
+default: deny
+
+items:
+  # Only the Sport Flashlight variant, with a handful of allowed add-ons.
+  Flashlight:
+    default: deny
+    allow:
+      - Sport Flashlight
+    addons:
+      default: deny
+      allow:
+        - Wide Lens
+        - Power Bulb
+        - Leather Grip
+        - Battery
+
+  # All Med-Kit variants except the Anniversary one; all add-ons except the strong heal.
+  Med-Kit:
+    default: allow
+    deny:
+      - Anniversary Med-Kit
+    addons:
+      default: allow
+      deny:
+        - Styptic Agent
+        - Anti-Haemorrhagic Syringe
+
+  # Allow every Toolbox variant, but no add-ons at all.
+  Toolbox:
+    default: allow
+    addons:
+      default: deny
