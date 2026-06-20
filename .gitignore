@@ -43,6 +43,9 @@ utilities/perk-sheet-generator/output/*
 utilities/item-sheet-generator/input/*
 utilities/item-sheet-generator/output/*
 
+utilities/addon-sheet-generator/input/*
+utilities/addon-sheet-generator/output/*
+
 public/BalancingPresets/Autobalance/*
 autobalance-info/*
 

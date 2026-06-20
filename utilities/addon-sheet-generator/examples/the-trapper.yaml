@@ -1,0 +1,18 @@
+# Killer add-on allow-list example: The Trapper
+# Run from the repo root:
+#   node utilities/addon-sheet-generator/addon-sheet-generator.js \
+#        utilities/addon-sheet-generator/examples/the-trapper.yaml \
+#        --out utilities/addon-sheet-generator/output \
+#        --preset utilities/addon-sheet-generator/output/test-preset.json
+
+killer: The Trapper
+balancing: DBDLeague
+
+addons:
+  default: allow         # Start with every Trapper add-on allowed
+  deny:                  # Then remove these
+    - { rarity: "Ultra Rare" }   # group: ban the whole iridescent tier
+    - Honing Stone               # individual add-on by name
+    - Trapper Sack
+  allow:                 # allow wins on conflict — re-permit one iridescent
+    - Bloody Coil
