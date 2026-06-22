@@ -37,6 +37,11 @@ const PNG_ADDONS    = path.join(REPO_ROOT, 'canvas-image-library', 'Addons');
 const PNG_PORTRAITS = path.join(REPO_ROOT, 'canvas-image-library', 'Portraits');
 
 // ---------------------------------------------------------------------------
+// Rarity
+// ---------------------------------------------------------------------------
+const RARITY_NAMES = ['Common', 'Uncommon', 'Rare', 'Very Rare', 'Ultra Rare', 'Event'];
+
+// ---------------------------------------------------------------------------
 // Layout constants
 // ---------------------------------------------------------------------------
 const ITEM_ICON  = 96;   // px per item-variant icon
@@ -44,7 +49,6 @@ const ADDON_ICON = 56;   // px per add-on icon
 const GAP        = 12;   // px between icons
 const ROW_GAP    = 16;   // px between rows
 const MARGIN     = 32;   // outer margin
-const NAME_W     = 250;  // fixed width of the variant-name column
 const HEADER_H   = 190;  // header height
 const ROW_H      = ITEM_ICON;
 const BG_COLOR   = '#100f16';
@@ -100,6 +104,19 @@ function buildNameLookup(list) {
         if (!map.has(n)) map.set(n, o);
     }
     return map;
+}
+
+function rarityToIndex(value, filePath) {
+    if (typeof value === 'number') {
+        if (value >= 0 && value < RARITY_NAMES.length) return value;
+        fatal(`Rarity index ${value} out of range (0–${RARITY_NAMES.length - 1}) in "${filePath}".`);
+    }
+    const norm = normalize(value);
+    const idx = RARITY_NAMES.findIndex(n => normalize(n) === norm);
+    if (idx === -1) {
+        fatal(`Unknown rarity "${value}" in "${filePath}". Expected one of: ${RARITY_NAMES.join(', ')} (or a 0–5 index).`);
+    }
+    return idx;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,26 +181,28 @@ function resolveAllowList(cfg, universe, fallbackDefault, label, filePath) {
         for (const e of universe) allowed.set(e.id, e);
     }
 
-    const resolveSel = (sel) => {
-        if (typeof sel !== 'string') {
-            fatal(
-                `Invalid ${label} selector ${JSON.stringify(sel)} in file "${filePath}". ` +
-                `Only plain names are supported.`
-            );
+    // Returns an array of matching entries (one for a name string, many for {rarity:}).
+    const resolveSels = (sel) => {
+        if (typeof sel === 'string') {
+            const e = lookup.get(normalize(sel));
+            if (!e) fatal(`Unknown ${label} "${sel}" in file "${filePath}".`);
+            return [e];
         }
-        const e = lookup.get(normalize(sel));
-        if (!e) {
-            fatal(`Unknown ${label} "${sel}" in file "${filePath}".`);
+        if (typeof sel === 'object' && sel !== null && sel.rarity !== undefined) {
+            const idx = rarityToIndex(sel.rarity, filePath);
+            return universe.filter(a => a.Rarity === idx);
         }
-        return e;
+        fatal(
+            `Invalid ${label} selector ${JSON.stringify(sel)} in file "${filePath}". ` +
+            `Expected a plain name string or a {rarity: ...} object.`
+        );
     };
 
     for (const sel of (cfg && cfg.deny) || []) {
-        allowed.delete(resolveSel(sel).id);
+        for (const e of resolveSels(sel)) allowed.delete(e.id);
     }
     for (const sel of (cfg && cfg.allow) || []) {
-        const e = resolveSel(sel);
-        allowed.set(e.id, e);
+        for (const e of resolveSels(sel)) allowed.set(e.id, e);
     }
 
     return [...allowed.values()].sort((a, b) => a.Name.localeCompare(b.Name));
@@ -290,12 +309,45 @@ async function renderSheet(killer, types, killerSlug, outDir, balancing, dateLab
     const variantCount = rows.length;
     const maxAddons = rows.reduce((m, r) => Math.max(m, r.addons.length), 0);
 
-    // Geometry
-    const addonStripX = MARGIN + ITEM_ICON + GAP + NAME_W + GAP;
+    // Load the portrait up front so its width feeds into the layout below
+    // (loadImage needs no canvas, so this can run before the canvas is sized).
+    let portraitImg = null;
+    try {
+        portraitImg = await loadImage(portraitPng(killer));
+    } catch (e) { /* fallback: no portrait */ }
+
+    const portraitH = HEADER_H - MARGIN;
+    const portraitW = portraitImg
+        ? Math.round((portraitImg.width / portraitImg.height) * portraitH)
+        : 0;
+    const textX = portraitImg ? MARGIN + portraitW + 16 : MARGIN;
+
+    // Body geometry
+    const addonStripX = MARGIN + ITEM_ICON + GAP;
     const addonStripW = maxAddons > 0
         ? maxAddons * (ADDON_ICON + GAP) - GAP
         : 240; // room for the "(no add-ons allowed)" note
-    const width  = addonStripX + addonStripW + MARGIN;
+    const bodyWidth = addonStripX + addonStripW + MARGIN;
+
+    // Header-text width: keep the canvas wide enough for the title block and the
+    // right-aligned provenance lines so they are never clipped on narrow sheets.
+    const measure = createCanvas(1, 1).getContext('2d');
+    measure.font = '700 30pt sans-serif';
+    const titleW = measure.measureText(`Going against: ${killer.Name}`).width;
+    measure.font = '400 18pt sans-serif';
+    const subW = measure.measureText('Allowed Items & Add-ons').width;
+    measure.font = '400 16pt sans-serif';
+    const countW = measure.measureText(`(${variantCount} items)`).width;
+    const leftMaxW = Math.max(titleW, subW, countW);
+    measure.font = '400 13pt sans-serif';
+    const genW = measure.measureText(`Generated: ${dateLabel}`).width;
+    const balW = balancing ? measure.measureText(`Balancing: ${balancing}`).width : 0;
+    const metaMaxW = Math.max(genW, balW);
+
+    const leftNeed = textX + leftMaxW + MARGIN;
+    const metaNeed = textX + metaMaxW + MARGIN; // textX floor also clears the portrait
+    const width = Math.ceil(Math.max(bodyWidth, leftNeed, metaNeed));
+
     const bodyH  = variantCount > 0
         ? variantCount * (ROW_H + ROW_GAP) - ROW_GAP
         : 0;
@@ -309,22 +361,10 @@ async function renderSheet(killer, types, killerSlug, outDir, balancing, dateLab
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // --- Header ---
-    let portraitImg = null;
-    try {
-        portraitImg = await loadImage(portraitPng(killer));
-    } catch (e) { /* fallback: no portrait */ }
-
-    const portraitH = HEADER_H - MARGIN;
-    const portraitW = portraitImg
-        ? Math.round((portraitImg.width / portraitImg.height) * portraitH)
-        : 0;
-
-    let textX = MARGIN;
     if (portraitImg) {
         // Top-align the portrait with the killer name (both at MARGIN); its left
         // edge already sits at MARGIN, in line with the item-variant icon column.
         ctx.drawImage(portraitImg, MARGIN, MARGIN, portraitW, portraitH);
-        textX = MARGIN + portraitW + 16;
     }
 
     ctx.fillStyle = TEXT_COLOR;
@@ -385,13 +425,6 @@ async function renderSheet(killer, types, killerSlug, outDir, balancing, dateLab
             ctx.fillStyle = '#333333';
             ctx.fillRect(MARGIN, y, ITEM_ICON, ITEM_ICON);
         }
-
-        // Variant name (vertically centered in the row)
-        ctx.fillStyle = TEXT_COLOR;
-        ctx.font = '600 15pt sans-serif';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(r.variant.Name, MARGIN + ITEM_ICON + GAP, y + ROW_H / 2, NAME_W - GAP);
-        ctx.textBaseline = 'top';
 
         // Add-on strip
         const ay = y + Math.round((ROW_H - ADDON_ICON) / 2);

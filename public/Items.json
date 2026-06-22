@@ -12,71 +12,85 @@
                 {
                     "id": 0,
                     "Name": "Broken Bulb",
+                    "Rarity": 5,
                     "icon": "public/Addons/Broken-Bulb.webp"
                 },
                 {
                     "id": 1,
                     "Name": "Wide Lens",
+                    "Rarity": 0,
                     "icon": "public/Addons/Wide-Lens.webp"
                 },
                 {
                     "id": 2,
                     "Name": "Power Bulb",
+                    "Rarity": 0,
                     "icon": "public/Addons/Power-Bulb.webp"
                 },
                 {
                     "id": 3,
                     "Name": "Leather Grip",
+                    "Rarity": 0,
                     "icon": "public/Addons/Leather-Grip.webp"
                 },
                 {
                     "id": 4,
                     "Name": "Battery",
+                    "Rarity": 0,
                     "icon": "public/Addons/Battery.webp"
                 },
                 {
                     "id": 5,
                     "Name": "Tir Optic",
+                    "Rarity": 1,
                     "icon": "public/Addons/Tir-Optic.webp"
                 },
                 {
                     "id": 6,
                     "Name": "Rubber Grip",
+                    "Rarity": 1,
                     "icon": "public/Addons/Rubber-Grip.webp"
                 },
                 {
                     "id": 7,
                     "Name": "Low Amp Filament",
+                    "Rarity": 1,
                     "icon": "public/Addons/Low-Amp-Filament.webp"
                 },
                 {
                     "id": 8,
                     "Name": "Heavy Duty Battery",
+                    "Rarity": 1,
                     "icon": "public/Addons/Heavy-Duty-Battery.webp"
                 },
                 {
                     "id": 9,
                     "Name": "Focus Lens",
+                    "Rarity": 1,
                     "icon": "public/Addons/Focus-Lens.webp"
                 },
                 {
                     "id": 10,
                     "Name": "Long Life Battery",
+                    "Rarity": 2,
                     "icon": "public/Addons/Long-Life-Battery.webp"
                 },
                 {
                     "id": 11,
                     "Name": "Intense Halogen",
+                    "Rarity": 2,
                     "icon": "public/Addons/Intense-Halogen.webp"
                 },
                 {
                     "id": 12,
                     "Name": "High-End Sapphire Lens",
+                    "Rarity": 3,
                     "icon": "public/Addons/High-End-Sapphire-Lens.webp"
                 },
                 {
                     "id": 13,
                     "Name": "Odd Bulb",
+                    "Rarity": 4,
                     "icon": "public/Addons/Odd-Bulb.webp"
                 }
             ]
@@ -88,71 +102,85 @@
                 {
                     "id": 0,
                     "Name": "Rubber Gloves",
+                    "Rarity": 0,
                     "icon": "public/Addons/Rubber-Gloves.webp"
                 },
                 {
                     "id": 1,
                     "Name": "Butterfly Tape",
+                    "Rarity": 0,
                     "icon": "public/Addons/Butterfly-Tape.webp"
                 },
                 {
                     "id": 2,
                     "Name": "Bandages",
+                    "Rarity": 0,
                     "icon": "public/Addons/Bandages.webp"
                 },
                 {
                     "id": 3,
                     "Name": "Sponge",
+                    "Rarity": 1,
                     "icon": "public/Addons/Sponge.webp"
                 },
                 {
                     "id": 4,
                     "Name": "Self Adherent Wrap",
+                    "Rarity": 1,
                     "icon": "public/Addons/Self-Adherent-Wrap.webp"
                 },
                 {
                     "id": 5,
                     "Name": "Needle & Thread",
+                    "Rarity": 1,
                     "icon": "public/Addons/Needle-and-Thread.webp"
                 },
                 {
                     "id": 6,
                     "Name": "Medical Scissors",
+                    "Rarity": 1,
                     "icon": "public/Addons/Medical-Scissors.webp"
                 },
                 {
                     "id": 7,
                     "Name": "Surgical Suture",
+                    "Rarity": 2,
                     "icon": "public/Addons/Surgical-Suture.webp"
                 },
                 {
                     "id": 8,
                     "Name": "Gauze Roll",
+                    "Rarity": 2,
                     "icon": "public/Addons/Gauze-Roll.webp"
                 },
                 {
                     "id": 9,
                     "Name": "Styptic Agent",
+                    "Rarity": 3,
                     "icon": "public/Addons/Styptic-Agent.webp"
                 },
                 {
                     "id": 10,
                     "Name": "Abdominal Dressing",
+                    "Rarity": 3,
                     "icon": "public/Addons/Abdominal-Dressing.webp"
                 },
                 {
                     "id": 11,
                     "Name": "Gel Dressings",
+                    "Rarity": 4,
                     "icon": "public/Addons/Gel-Dressings.webp"
                 },
                 {
                     "id": 12,
                     "Name": "Anti-Haemorrhagic Syringe",
+                    "Rarity": 4,
                     "icon": "public/Addons/Anti-Haemorrhagic-Syringe.webp"
                 },
                 {
                     "id": 13,
                     "Name": "Refined Serum",
+                    "Rarity": 5,
                     "icon": "public/Addons/Refined-Serum.webp"
                 }
             ]
@@ -164,56 +192,67 @@
                 {
                     "id": 0,
                     "Name": "Scraps",
+                    "Rarity": 0,
                     "icon": "public/Addons/Scraps.webp"
                 },
                 {
                     "id": 1,
                     "Name": "Instructions",
+                    "Rarity": 0,
                     "icon": "public/Addons/Instructions.webp"
                 },
                 {
                     "id": 2,
                     "Name": "Clean Rag",
+                    "Rarity": 0,
                     "icon": "public/Addons/Clean-Rag.webp"
                 },
                 {
                     "id": 3,
                     "Name": "Wire Spool",
+                    "Rarity": 1,
                     "icon": "public/Addons/Wire-Spool.webp"
                 },
                 {
                     "id": 4,
                     "Name": "Spring Clamp",
+                    "Rarity": 1,
                     "icon": "public/Addons/Spring-Clamp.webp"
                 },
                 {
                     "id": 5,
                     "Name": "Socket Swivels",
+                    "Rarity": 1,
                     "icon": "public/Addons/Socket-Swivels.webp"
                 },
                 {
                     "id": 6,
                     "Name": "Protective Gloves",
+                    "Rarity": 1,
                     "icon": "public/Addons/Protective-Gloves.webp"
                 },
                 {
                     "id": 7,
                     "Name": "Cutting Wire",
+                    "Rarity": 1,
                     "icon": "public/Addons/Cutting-Wire.webp"
                 },
                 {
                     "id": 8,
                     "Name": "Hacksaw",
+                    "Rarity": 2,
                     "icon": "public/Addons/Hacksaw.webp"
                 },
                 {
                     "id": 9,
                     "Name": "Grip Wrench",
+                    "Rarity": 2,
                     "icon": "public/Addons/Grip-Wrench.webp"
                 },
                 {
                     "id": 10,
                     "Name": "Brand New Part",
+                    "Rarity": 4,
                     "icon": "public/Addons/Brand-New-Part.webp"
                 }
             ]
@@ -225,26 +264,31 @@
                 {
                     "id": 0,
                     "Name": "Friendship Charm",
+                    "Rarity": 0,
                     "icon": "public/Addons/Friendship-Charm.webp"
                 },
                 {
                     "id": 1,
                     "Name": "Shrill Whistle",
+                    "Rarity": 1,
                     "icon": "public/Addons/Shrill-Whistle.webp"
                 },
                 {
                     "id": 2,
                     "Name": "Braided Bauble",
+                    "Rarity": 2,
                     "icon": "public/Addons/Braided-Bauble.webp"
                 },
                 {
                     "id": 3,
                     "Name": "Unique Wedding Ring",
+                    "Rarity": 3,
                     "icon": "public/Addons/Unique-Wedding-Ring.webp"
                 },
                 {
                     "id": 4,
                     "Name": "Blood-Amber",
+                    "Rarity": 4,
                     "icon": "public/Addons/Blood-Amber.webp"
                 }
             ]
@@ -256,26 +300,31 @@
                 {
                     "id": 0,
                     "Name": "Glowing Ink",
+                    "Rarity": 0,
                     "icon": "public/Addons/Glowing-Ink.webp"
                 },
                 {
                     "id": 1,
                     "Name": "Gnarled Compass",
+                    "Rarity": 1,
                     "icon": "public/Addons/Gnarled-Compass.webp"
                 },
                 {
                     "id": 2,
                     "Name": "Battered Tape",
+                    "Rarity": 2,
                     "icon": "public/Addons/Battered-Tape.webp"
                 },
                 {
                     "id": 3,
                     "Name": "Sharpened Flint",
+                    "Rarity": 3,
                     "icon": "public/Addons/Sharpened-Flint.webp"
                 },
                 {
                     "id": 4,
                     "Name": "Crimson Stamp",
+                    "Rarity": 4,
                     "icon": "public/Addons/Crimson-Stamp.webp"
                 }
             ]
@@ -287,26 +336,31 @@
                 {
                     "id": 0,
                     "Name": "Volcanic Stone",
+                    "Rarity": 0,
                     "icon": "public/Addons/Volcanic-Stone.webp"
                 },
                 {
                     "id": 1,
                     "Name": "Reactive Compound",
+                    "Rarity": 1,
                     "icon": "public/Addons/Reactive-Compound.webp"
                 },
                 {
                     "id": 2,
                     "Name": "Oily Sap",
+                    "Rarity": 2,
                     "icon": "public/Addons/Oily-Sap.webp"
                 },
                 {
                     "id": 3,
                     "Name": "Mushroom Formula",
+                    "Rarity": 3,
                     "icon": "public/Addons/Mushroom-Formula.webp"
                 },
                 {
                     "id": 4,
                     "Name": "Potent Extract",
+                    "Rarity": 4,
                     "icon": "public/Addons/Potent-Extract.webp"
                 }
             ]
@@ -317,198 +371,231 @@
             "id": 0,
             "Name": "Firecracker",
             "Type": "Firecracker",
+            "Rarity": 5,
             "icon": "public/Items/Firecracker.webp"
         },
         {
             "id": 4,
             "Name": "Flashlight",
             "Type": "Flashlight",
+            "Rarity": 1,
             "icon": "public/Items/Flashlight.webp"
         },
         {
             "id": 5,
             "Name": "Sport Flashlight",
             "Type": "Flashlight",
+            "Rarity": 2,
             "icon": "public/Items/Sport-Flashlight.webp"
         },
         {
             "id": 6,
             "Name": "Utility Flashlight",
             "Type": "Flashlight",
+            "Rarity": 3,
             "icon": "public/Items/Utility-Flashlight.webp"
         },
         {
             "id": 1,
             "Name": "Will O' Wisp",
             "Type": "Flashlight",
+            "Rarity": 5,
             "icon": "public/Items/Will-O_-Wisp.webp"
         },
         {
             "id": 2,
             "Name": "Masquerade Flashlight",
             "Type": "Flashlight",
+            "Rarity": 5,
             "icon": "public/Items/Masquerade-Flashlight.webp"
         },
         {
             "id": 3,
             "Name": "Anniversary Flashlight",
             "Type": "Flashlight",
+            "Rarity": 5,
             "icon": "public/Items/Anniversary-Flashlight.webp"
         },
         {
             "id": 7,
             "Name": "Camping Aid Kit",
             "Type": "Med-Kit",
+            "Rarity": 0,
             "icon": "public/Items/Camping-Aid-Kit.webp"
         },
         {
             "id": 8,
             "Name": "First Aid Kit",
             "Type": "Med-Kit",
+            "Rarity": 1,
             "icon": "public/Items/First-Aid-Kit.webp"
         },
         {
             "id": 9,
             "Name": "Emergency Med-Kit",
             "Type": "Med-Kit",
+            "Rarity": 2,
             "icon": "public/Items/Emergency-Med-Kit.webp"
         },
         {
             "id": 10,
             "Name": "Ranger Med-Kit",
             "Type": "Med-Kit",
+            "Rarity": 3,
             "icon": "public/Items/Ranger-Med-Kit.webp"
         },
         {
             "id": 11,
             "Name": "All Hallows' Eve Lunchbox",
             "Type": "Med-Kit",
+            "Rarity": 5,
             "icon": "public/Items/All-Hallows_-Eve-Lunchbox.webp"
         },
         {
             "id": 12,
             "Name": "Anniversary Med-Kit",
             "Type": "Med-Kit",
+            "Rarity": 5,
             "icon": "public/Items/Anniversary-Med-Kit.webp"
         },
         {
             "id": 13,
             "Name": "Masquerade Med-Kit",
             "Type": "Med-Kit",
+            "Rarity": 5,
             "icon": "public/Items/Masquerade-Med-Kit.webp"
         },
         {
             "id": 14,
             "Name": "Worn-Out Tools",
             "Type": "Toolbox",
+            "Rarity": 0,
             "icon": "public/Items/Worn-Out-Tools.webp"
         },
         {
             "id": 15,
             "Name": "Toolbox",
             "Type": "Toolbox",
+            "Rarity": 1,
             "icon": "public/Items/Toolbox.webp"
         },
         {
             "id": 16,
             "Name": "Mechanic's Toolbox",
             "Type": "Toolbox",
+            "Rarity": 2,
             "icon": "public/Items/Mechanic_s-Toolbox.webp"
         },
         {
             "id": 17,
             "Name": "Commodious Toolbox",
             "Type": "Toolbox",
+            "Rarity": 2,
             "icon": "public/Items/Commodious-Toolbox.webp"
         },
         {
             "id": 18,
             "Name": "Engineer's Toolbox",
             "Type": "Toolbox",
+            "Rarity": 3,
             "icon": "public/Items/Engineer_s-Toolbox.webp"
         },
         {
             "id": 19,
             "Name": "Alex's Toolbox",
             "Type": "Toolbox",
+            "Rarity": 3,
             "icon": "public/Items/Alex_s-Toolbox.webp"
         },
         {
             "id": 20,
             "Name": "Festive Toolbox",
             "Type": "Toolbox",
+            "Rarity": 5,
             "icon": "public/Items/Festive-Toolbox.webp"
         },
         {
             "id": 21,
             "Name": "Anniversary Toolbox",
             "Type": "Toolbox",
+            "Rarity": 5,
             "icon": "public/Items/Anniversary-Toolbox.webp"
         },
         {
             "id": 22,
             "Name": "Masquerade Toolbox",
             "Type": "Toolbox",
+            "Rarity": 5,
             "icon": "public/Items/Masquerade-Toolbox.webp"
         },
         {
             "id": 23,
             "Name": "Broken Key",
             "Type": "Key",
+            "Rarity": 0,
             "icon": "public/Items/Broken-Key.webp"
         },
         {
             "id": 24,
             "Name": "Dull Key",
             "Type": "Key",
+            "Rarity": 1,
             "icon": "public/Items/Dull-Key.webp"
         },
         {
             "id": 25,
             "Name": "Skeleton Key",
             "Type": "Key",
+            "Rarity": 2,
             "icon": "public/Items/Skeleton-Key.webp"
         },
         {
             "id": 26,
             "Name": "Cryptic Map",
             "Type": "Map",
+            "Rarity": 0,
             "icon": "public/Items/Cryptic-Map.webp"
         },
         {
             "id": 27,
             "Name": "Scribbled Map",
             "Type": "Map",
+            "Rarity": 1,
             "icon": "public/Items/Scribbled-Map.webp"
         },
         {
             "id": 28,
             "Name": "Annotated Map",
             "Type": "Map",
+            "Rarity": 2,
             "icon": "public/Items/Annotated-Map.webp"
         },
         {
             "id": 29,
             "Name": "Bloodsense Map",
             "Type": "Map",
+            "Rarity": 5,
             "icon": "public/Items/Bloodsense-Map.webp"
         },
         {
             "id": 30,
             "Name": "Apprentice's Fog Vial",
             "Type": "Fog Vial",
+            "Rarity": 0,
             "icon": "public/Items/Apprentice_S-Fog-Vial.webp"
         },
         {
             "id": 31,
             "Name": "Artisan's Fog Vial",
             "Type": "Fog Vial",
+            "Rarity": 1,
             "icon": "public/Items/Artisan_S-Fog-Vial.webp"
         },
         {
             "id": 32,
             "Name": "Vigo's Fog Vial",
             "Type": "Fog Vial",
+            "Rarity": 2,
             "icon": "public/Items/Vigo_S-Fog-Vial.webp"
         }
     ]

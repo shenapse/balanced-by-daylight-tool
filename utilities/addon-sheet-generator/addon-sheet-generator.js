@@ -293,9 +293,44 @@ async function renderSheet(killer, allowedAddons, killerSlug, columns, outDir, b
         if (group.length > 0) sections.push({ rarity: r, addons: group });
     }
 
+    // Load the portrait up front so its width feeds into the layout below
+    // (loadImage needs no canvas, so this can run before the canvas is sized).
+    const portraitPath = portraitPng(killer);
+    let portraitImg = null;
+    try {
+        portraitImg = await loadImage(portraitPath);
+    } catch (e) {
+        // fallback: no portrait
+    }
+
+    const portraitH = HEADER_H - MARGIN;
+    const portraitW = portraitImg
+        ? Math.round((portraitImg.width / portraitImg.height) * portraitH)
+        : 0;
+    const textX = portraitImg ? MARGIN + portraitW + 16 : MARGIN;
+
     // Geometry: each section wraps its add-ons at `columns`.
     const gridW = columns * ICON + (columns - 1) * GAP;
-    const width = MARGIN + LABEL_W + GAP + gridW + MARGIN;
+    const bodyWidth = MARGIN + LABEL_W + GAP + gridW + MARGIN;
+
+    // Width: max of the add-on grid and the header text (title block + right-aligned
+    // provenance), so the header is never clipped on narrow grids.
+    const measure = createCanvas(1, 1).getContext('2d');
+    measure.font = '700 30pt sans-serif';
+    const titleW = measure.measureText(killer.Name).width;
+    measure.font = '400 18pt sans-serif';
+    const subW = measure.measureText('Allowed Killer Add-ons').width;
+    measure.font = '400 16pt sans-serif';
+    const countW = measure.measureText(`(${count} add-ons)`).width;
+    const leftMaxW = Math.max(titleW, subW, countW);
+    measure.font = '400 13pt sans-serif';
+    const genW = measure.measureText(`Generated: ${dateLabel}`).width;
+    const balW = balancing ? measure.measureText(`Balancing: ${balancing}`).width : 0;
+    const metaMaxW = Math.max(genW, balW);
+
+    const leftNeed = textX + leftMaxW + MARGIN;
+    const metaNeed = textX + metaMaxW + MARGIN; // textX floor also clears the portrait
+    const width = Math.ceil(Math.max(bodyWidth, leftNeed, metaNeed));
 
     // Compute the height + per-section y offsets.
     let bodyH = 0;
@@ -317,23 +352,8 @@ async function renderSheet(killer, allowedAddons, killerSlug, columns, outDir, b
     ctx.fillRect(0, 0, width, height);
 
     // --- Header ---
-    const portraitPath = portraitPng(killer);
-    let portraitImg = null;
-    try {
-        portraitImg = await loadImage(portraitPath);
-    } catch (e) {
-        // fallback: no portrait
-    }
-
-    const portraitH = HEADER_H - MARGIN;
-    const portraitW = portraitImg
-        ? Math.round((portraitImg.width / portraitImg.height) * portraitH)
-        : 0;
-
-    let textX = MARGIN;
     if (portraitImg) {
         ctx.drawImage(portraitImg, MARGIN, MARGIN, portraitW, portraitH);
-        textX = MARGIN + portraitW + 16;
     }
 
     ctx.fillStyle = TEXT_COLOR;

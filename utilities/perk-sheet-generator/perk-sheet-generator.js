@@ -291,18 +291,10 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
     const rows  = count > 0 ? Math.ceil(count / columns) : 0;
     const gridW = columns * ICON + (columns - 1) * GAP;
     const gridH = rows > 0 ? rows * ICON + (rows - 1) * GAP : 0;
-    const width  = MARGIN * 2 + gridW;
     const height = HEADER_H + gridH + MARGIN * 2;
 
-    const canvas = createCanvas(width, height);
-    const ctx    = canvas.getContext('2d');
-
-    // Background
-    ctx.fillStyle = BG_COLOR;
-    ctx.fillRect(0, 0, width, height);
-
-    // --- Header ---
-    // Load portrait
+    // Load the portrait up front so its width feeds into the layout below
+    // (loadImage needs no canvas, so this can run before the canvas is sized).
     const portraitPath = portraitPng(killer);
     let portraitImg = null;
     try {
@@ -315,18 +307,44 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
     const portraitW = portraitImg
         ? Math.round((portraitImg.width / portraitImg.height) * portraitH)
         : 0;
+    const textX = portraitImg ? MARGIN + portraitW + 16 : MARGIN;
 
-    let textX = MARGIN;
+    const isSurvivorSheet = sideLabel === 'Allowed Survivor Perks';
+    const titleText = isSurvivorSheet ? `Going against: ${killer.Name}` : killer.Name;
 
+    // Width: max of the perk grid and the header text (title block + right-aligned
+    // provenance), so the header is never clipped on narrow grids.
+    const bodyWidth = MARGIN * 2 + gridW;
+    const measure = createCanvas(1, 1).getContext('2d');
+    measure.font = '700 30pt sans-serif';
+    const titleW = measure.measureText(titleText).width;
+    measure.font = '400 18pt sans-serif';
+    const subW = measure.measureText(sideLabel).width;
+    measure.font = '400 16pt sans-serif';
+    const countW = measure.measureText(`(${count} perks)`).width;
+    const leftMaxW = Math.max(titleW, subW, countW);
+    measure.font = '400 13pt sans-serif';
+    const genW = measure.measureText(`Generated: ${dateLabel}`).width;
+    const balW = balancing ? measure.measureText(`Balancing: ${balancing}`).width : 0;
+    const metaMaxW = Math.max(genW, balW);
+
+    const leftNeed = textX + leftMaxW + MARGIN;
+    const metaNeed = textX + metaMaxW + MARGIN; // textX floor also clears the portrait
+    const width = Math.ceil(Math.max(bodyWidth, leftNeed, metaNeed));
+
+    const canvas = createCanvas(width, height);
+    const ctx    = canvas.getContext('2d');
+
+    // Background
+    ctx.fillStyle = BG_COLOR;
+    ctx.fillRect(0, 0, width, height);
+
+    // --- Header ---
     if (portraitImg) {
         // Top-align the portrait with the killer name (both at MARGIN); its left
         // edge already sits at MARGIN, in line with the first perk-icon column.
         ctx.drawImage(portraitImg, MARGIN, MARGIN, portraitW, portraitH);
-        textX = MARGIN + portraitW + 16;
     }
-
-    const isSurvivorSheet = sideLabel === 'Allowed Survivor Perks';
-    const titleText = isSurvivorSheet ? `Going against: ${killer.Name}` : killer.Name;
 
     ctx.fillStyle = TEXT_COLOR;
     ctx.font = '700 30pt sans-serif';

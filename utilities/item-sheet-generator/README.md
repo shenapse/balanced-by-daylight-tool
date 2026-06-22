@@ -80,6 +80,7 @@ items:
       default: allow
       deny:
         - Anti-Haemorrhagic Syringe
+        - { rarity: "Ultra Rare" }   # ban all Ultra Rare add-ons (e.g. Gel Dressings)
 ```
 
 ### Resolution rules (applied independently for variants and for add-ons of each type)
@@ -95,12 +96,26 @@ items:
 
 ### Selectors
 
-Each entry in `allow:` / `deny:` is a **plain name string** (item-variant name or add-on name),
-matched case-insensitively with spaces/dashes/underscores/apostrophes/ampersands folded. There are
-no group selectors — survivor item add-ons carry no rarity or tag metadata.
+Each entry in `allow:` / `deny:` is either:
 
-**Hard errors** (non-zero exit): an unknown killer name, an unknown item-type key, or an unknown
-variant/add-on name (the message names the offending token and the file).
+- A **plain name string** — item-variant or add-on name, matched case-insensitively with
+  spaces/dashes/underscores/apostrophes/ampersands folded.
+- A **rarity object** (add-on lists only) — `{ rarity: <name-or-index> }` — selects all add-ons
+  of that rarity at once. Accepted forms:
+
+  ```yaml
+  addons:
+    deny:
+      - { rarity: "Ultra Rare" }   # by name (case-insensitive)
+      - { rarity: 4 }              # equivalent using a numeric rarity index
+  ```
+
+  Valid rarity names (and their numeric indices): `Common` (0), `Uncommon` (1), `Rare` (2),
+  `Very Rare` (3), `Ultra Rare` (4), `Event` (5).
+
+**Hard errors** (non-zero exit): an unknown killer name, an unknown item-type key, an unknown
+variant/add-on name, an unknown rarity name, or an unrecognised selector shape (the message names
+the offending token and the file).
 
 ## Output
 
