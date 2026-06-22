@@ -20,7 +20,7 @@ node utilities/perk-sheet-generator/perk-sheet-generator.js \
 
 ```
 node utilities/perk-sheet-generator/perk-sheet-generator.js <file.yaml...>
-     [--out <dir>]        Output directory (default: utilities/perk-sheet-generator/output/)
+     [--out <dir>]        Output directory (default: next to each input file)
      [--columns <n>]      Grid columns (default: 8)
      [--preset <path>]    Also compile a BbD preset JSON from all input files
      [--name "<name>"]    Preset Name field (default: "Generated Allow-List")
@@ -30,6 +30,9 @@ node utilities/perk-sheet-generator/perk-sheet-generator.js <file.yaml...>
 
 ```yaml
 killer: The Trapper     # Matched against Killers.json Name + Aliases (case-insensitive)
+
+balancing: DBDLeague    # Optional. Label of the balancing ruleset these allow-lists
+                        # come from. Rendered on both sheets and stored in the preset JSON.
 
 # Optional. Restricts which perks are considered for each side.
 # Default: every perk in dbdperks.json for that side.
@@ -107,7 +110,11 @@ Two PNG files per killer into `<outDir>/`:
 
 Perks are sorted **alphabetically by name**. Last row is left-aligned.
 
-Header shows: killer portrait (thumbnail), killer name, side label, and `(N perks)`.
+Header shows: killer portrait (thumbnail), a title, side label, `(N perks)`, and a
+provenance block with the `balancing` label (if set) and the auto-stamped generation
+timestamp. On the **survivor-side** sheet the title reads **"Going against: \<killer\>"**
+(survivors bring these perks against that killer); the killer-side sheet shows the plain
+killer name.
 When `count == 0` the header still renders with a "None allowed" note.
 
 ## Preset compilation (`--preset`)
@@ -118,6 +125,8 @@ BbD balancing preset JSON. The shape matches what `ValidateCustomBalancing()` ex
 ```json
 {
   "Name": "...",
+  "Balancing": "DBDLeague",
+  "GeneratedDate": "2026-06-20T14:32:00.000Z",
   "MaxPerkRepetition": 1,
   "GlobalNotes": "",
   "Tiers": [ { "Name": "General", "SurvivorIndvPerkBans": [], ... } ],
@@ -132,6 +141,10 @@ template so nothing is missing). The ban arrays are computed by inversion:
 - `SurvivorIndvPerkBans = (survivor universe) − (allowed survivor perks)` as string IDs
 
 Addon/item/offering fields are left as empty defaults.
+
+Top-level `Balancing` (from the first input file that sets it) and `GeneratedDate`
+(ISO timestamp of when the run produced the output) are added for provenance. They are
+extra metadata; `ValidateCustomBalancing()` ignores unrecognised top-level keys.
 
 ## Asset paths
 

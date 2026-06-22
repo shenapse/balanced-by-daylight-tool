@@ -16,6 +16,8 @@
  * Usage:
  *   node utilities/item-sheet-generator/item-sheet-generator.js <file.yaml...>
  *        [--out <dir>] [--preset <out.json>] [--name "<name>"]
+ *
+ * Sheets are written next to each input file by default; --out overrides this.
  */
 
 const fs   = require('fs');
@@ -43,7 +45,7 @@ const GAP        = 12;   // px between icons
 const ROW_GAP    = 16;   // px between rows
 const MARGIN     = 32;   // outer margin
 const NAME_W     = 250;  // fixed width of the variant-name column
-const HEADER_H   = 140;  // header height
+const HEADER_H   = 190;  // header height
 const ROW_H      = ITEM_ICON;
 const BG_COLOR   = '#100f16';
 const TEXT_COLOR = '#ffffff';
@@ -216,6 +218,9 @@ function processFile(filePath) {
         fatal(`Unknown killer "${doc.killer}" in file "${filePath}". No matching entry in Killers.json.`);
     }
 
+    // Balancing ruleset label (optional)
+    const balancing = (doc.balancing == null) ? '' : String(doc.balancing).trim();
+
     const topDefault = doc.default || 'deny';
     if (topDefault !== 'allow' && topDefault !== 'deny') {
         fatal(`Top-level "default" must be "allow" or "deny" in file "${filePath}".`);
@@ -253,7 +258,7 @@ function processFile(filePath) {
         return { type, allowedVariants, allowedAddons };
     });
 
-    return { killer, types };
+    return { killer, types, balancing };
 }
 
 // ---------------------------------------------------------------------------
@@ -273,7 +278,7 @@ function portraitPng(killer) {
 // ---------------------------------------------------------------------------
 // Image rendering
 // ---------------------------------------------------------------------------
-async function renderSheet(killer, types, killerSlug, outDir) {
+async function renderSheet(killer, types, killerSlug, outDir, balancing, dateLabel) {
     // Flatten to one row per allowed variant (in type order, then variant name)
     const rows = [];
     for (const { type, allowedVariants, allowedAddons } of types) {
@@ -316,15 +321,17 @@ async function renderSheet(killer, types, killerSlug, outDir) {
 
     let textX = MARGIN;
     if (portraitImg) {
-        const py = Math.round((HEADER_H - portraitH) / 2);
-        ctx.drawImage(portraitImg, MARGIN, py, portraitW, portraitH);
+        // Top-align the portrait with the killer name (both at MARGIN); its left
+        // edge already sits at MARGIN, in line with the item-variant icon column.
+        ctx.drawImage(portraitImg, MARGIN, MARGIN, portraitW, portraitH);
         textX = MARGIN + portraitW + 16;
     }
 
     ctx.fillStyle = TEXT_COLOR;
     ctx.textBaseline = 'top';
     ctx.font = '700 30pt sans-serif';
-    ctx.fillText(killer.Name, textX, MARGIN);
+    // Items are always survivor-facing (survivors bring items against the killer)
+    ctx.fillText(`Going against: ${killer.Name}`, textX, MARGIN);
 
     ctx.font = '400 18pt sans-serif';
     ctx.fillText('Allowed Items & Add-ons', textX, MARGIN + 46);
@@ -332,6 +339,19 @@ async function renderSheet(killer, types, killerSlug, outDir) {
     ctx.font = '400 16pt sans-serif';
     ctx.fillStyle = '#aaaaaa';
     ctx.fillText(`(${variantCount} items)`, textX, MARGIN + 84);
+
+    // Provenance: balancing ruleset + generation timestamp, bottom-aligned to portrait
+    ctx.font = '400 13pt sans-serif';
+    ctx.fillStyle = '#999999';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    const metaRight = canvas.width - MARGIN;
+    ctx.fillText(`Generated: ${dateLabel}`, metaRight, HEADER_H);
+    if (balancing) {
+        ctx.fillText(`Balancing: ${balancing}`, metaRight, HEADER_H - 22);
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
 
     if (variantCount === 0) {
         ctx.fillStyle = '#888888';
@@ -403,7 +423,7 @@ async function renderSheet(killer, types, killerSlug, outDir) {
 // ---------------------------------------------------------------------------
 // Preset compilation
 // ---------------------------------------------------------------------------
-function buildPreset(results, name) {
+function buildPreset(results, name, balancing, generatedISO) {
     const killerOverrides = results.map(({ killer, types }) => {
         const entry = JSON.parse(JSON.stringify(OVERRIDE_TEMPLATE));
 
@@ -447,6 +467,8 @@ function buildPreset(results, name) {
 
     return {
         Name: name,
+        Balancing: balancing || '',
+        GeneratedDate: generatedISO,
         MaxPerkRepetition: 1,
         GlobalNotes: '',
         Tiers: [
@@ -476,19 +498,26 @@ async function main() {
         process.exit(0);
     }
 
-    const outDir = args.outDir
-        ? path.resolve(args.outDir)
-        : path.join(__dirname, 'output');
-    if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+    // Output dir: explicit --out, otherwise next to each input file (per-file).
+    const outDirOverride = args.outDir ? path.resolve(args.outDir) : null;
+
+    // Stamp the generation time once so a batch shares a consistent timestamp
+    const generatedAt = new Date();
+    const generatedISO = generatedAt.toISOString();
+    const dateLabel = generatedISO.slice(0, 10);
 
     const results = [];
 
     for (const filePath of args.files) {
-        const result = processFile(path.resolve(filePath));
-        const { killer, types } = result;
+        const absPath = path.resolve(filePath);
+        const result = processFile(absPath);
+        const { killer, types, balancing } = result;
+
+        const outDir = outDirOverride || path.dirname(absPath);
+        fs.mkdirSync(outDir, { recursive: true });
 
         const killerSlug = killer.Name.replace(/\s+/g, '-');
-        const sheetOut = await renderSheet(killer, types, killerSlug, outDir);
+        const sheetOut = await renderSheet(killer, types, killerSlug, outDir, balancing, dateLabel);
 
         const variantCount = types.reduce((n, t) => n + t.allowedVariants.length, 0);
         console.log(
@@ -505,7 +534,8 @@ async function main() {
     }
 
     if (args.presetPath) {
-        const preset = buildPreset(results, args.presetName);
+        const presetBalancing = results.find(r => r.balancing)?.balancing || '';
+        const preset = buildPreset(results, args.presetName, presetBalancing, generatedISO);
         const presetAbs = path.resolve(args.presetPath);
         fs.writeFileSync(presetAbs, JSON.stringify(preset, null, 4), 'utf8');
         console.log(`\nPreset written → ${presetAbs}`);

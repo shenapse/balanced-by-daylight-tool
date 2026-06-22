@@ -1,5 +1,9 @@
 killer: The Trapper
 
+# Optional label identifying which balancing ruleset these allow-lists come from.
+# Shown on the generated sheet and stored in the --preset JSON.
+balancing: DBDLeague
+
 # Top-level default for any item type NOT listed under `items:` below.
 # deny = none of that type's variants/add-ons are allowed.
 default: deny

@@ -7,6 +7,10 @@
 
 killer: The Trapper
 
+# Optional label identifying which balancing ruleset these allow-lists come from.
+# Shown on both generated sheets and stored in the --preset JSON.
+balancing: DBDLeague
+
 # universe is optional; defaults to every perk in dbdperks.json for each side.
 # universe:
 #   killer: all

@@ -564,7 +564,7 @@ async function main() {
     // Stamp the generation time once so a batch shares a consistent timestamp
     const generatedAt = new Date();
     const generatedISO = generatedAt.toISOString();
-    const dateLabel = generatedISO.slice(0, 16).replace('T', ' ') + ' UTC';
+    const dateLabel = generatedISO.slice(0, 10);
 
     const results = [];
 

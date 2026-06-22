@@ -24,7 +24,7 @@ node utilities/item-sheet-generator/item-sheet-generator.js \
 
 ```
 node utilities/item-sheet-generator/item-sheet-generator.js <file.yaml...>
-     [--out <dir>]        Output directory (default: utilities/item-sheet-generator/output/)
+     [--out <dir>]        Output directory (default: next to each input file)
      [--preset <path>]    Also compile a BbD preset JSON from all input files
      [--name "<name>"]    Preset Name field (default: "Generated Item Allow-List")
 ```
@@ -50,6 +50,9 @@ So the YAML is keyed by **item type**, and within each type you control its **va
 
 ```yaml
 killer: The Trapper        # Matched against Killers.json Name + Aliases (normalized)
+
+balancing: DBDLeague       # OPTIONAL. Label of the balancing ruleset these allow-lists
+                           # come from. Rendered on the sheet and stored in the preset JSON.
 
 default: deny              # OPTIONAL. Default for any item type NOT listed under `items:`.
                            # allow | deny (default: deny).
@@ -104,7 +107,9 @@ variant/add-on name (the message names the offending token and the file).
 One PNG per input file into `<outDir>/`:
 - `<KillerSlug>-items.png`
 
-Layout: a dark header (killer portrait, name, "Allowed Items & Add-ons", item count), then one row
+Layout: a dark header (killer portrait, the title **"Going against: \<killer\>"** — survivors bring
+these items against that killer — "Allowed Items & Add-ons", item count, and a provenance block with
+the `balancing` label if set plus the auto-stamped generation timestamp), then one row
 per allowed variant — the variant icon, its name, and its type's allowed add-on icons in a strip.
 Rows with no allowed add-ons show "(no add-ons allowed)". Variants are grouped in item-type order,
 then sorted by name. Missing icons fall back to a grey placeholder box.
@@ -117,6 +122,8 @@ preset (shape matches `ValidateCustomBalancing()`):
 ```json
 {
   "Name": "...",
+  "Balancing": "DBDLeague",
+  "GeneratedDate": "2026-06-20T14:32:00.000Z",
   "MaxPerkRepetition": 1,
   "GlobalNotes": "",
   "Tiers": [ { "Name": "General", "SurvivorIndvPerkBans": [], ... } ],
@@ -130,6 +137,9 @@ Each `KillerOverride` entry is templated off `DEBUG.json` (so all required field
 
 All perk-related fields are left empty (this tool does not constrain perks — pair it with the
 `perk-sheet-generator` preset if you need both).
+
+Top-level `Balancing` (from the first input file that sets it) and `GeneratedDate` (ISO timestamp
+of the run) are added for provenance; `ValidateCustomBalancing()` ignores unrecognised top-level keys.
 
 ## Asset paths
 

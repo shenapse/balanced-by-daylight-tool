@@ -11,6 +11,8 @@
  * Usage:
  *   node utilities/perk-sheet-generator/perk-sheet-generator.js <file.yaml...>
  *        [--out <dir>] [--columns <n>] [--preset <out.json>] [--name "<name>"]
+ *
+ * Sheets are written next to each input file by default; --out overrides this.
  */
 
 const fs   = require('fs');
@@ -35,7 +37,7 @@ const DEFAULT_COLUMNS = 8;
 const ICON     = 118;   // px per icon
 const GAP      = 16;    // px between icons
 const MARGIN   = 32;    // outer margin
-const HEADER_H = 140;   // header height
+const HEADER_H = 190;   // header height
 const BG_COLOR   = '#100f16';
 const TEXT_COLOR = '#ffffff';
 
@@ -284,7 +286,7 @@ function portraitPng(killer) {
 // ---------------------------------------------------------------------------
 // Image rendering
 // ---------------------------------------------------------------------------
-async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns, outDir) {
+async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns, outDir, balancing, dateLabel) {
     const count = allowedPerks.length;
     const rows  = count > 0 ? Math.ceil(count / columns) : 0;
     const gridW = columns * ICON + (columns - 1) * GAP;
@@ -317,15 +319,19 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
     let textX = MARGIN;
 
     if (portraitImg) {
-        const py = Math.round((HEADER_H - portraitH) / 2);
-        ctx.drawImage(portraitImg, MARGIN, py, portraitW, portraitH);
+        // Top-align the portrait with the killer name (both at MARGIN); its left
+        // edge already sits at MARGIN, in line with the first perk-icon column.
+        ctx.drawImage(portraitImg, MARGIN, MARGIN, portraitW, portraitH);
         textX = MARGIN + portraitW + 16;
     }
+
+    const isSurvivorSheet = sideLabel === 'Allowed Survivor Perks';
+    const titleText = isSurvivorSheet ? `Going against: ${killer.Name}` : killer.Name;
 
     ctx.fillStyle = TEXT_COLOR;
     ctx.font = '700 30pt sans-serif';
     ctx.textBaseline = 'top';
-    ctx.fillText(killer.Name, textX, MARGIN);
+    ctx.fillText(titleText, textX, MARGIN);
 
     ctx.font = '400 18pt sans-serif';
     ctx.fillText(sideLabel, textX, MARGIN + 46);
@@ -333,6 +339,19 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
     ctx.font = '400 16pt sans-serif';
     ctx.fillStyle = '#aaaaaa';
     ctx.fillText(`(${count} perks)`, textX, MARGIN + 84);
+
+    // Provenance: balancing ruleset + generation timestamp, bottom-aligned to portrait
+    ctx.font = '400 13pt sans-serif';
+    ctx.fillStyle = '#999999';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'bottom';
+    const metaRight = width - MARGIN;
+    ctx.fillText(`Generated: ${dateLabel}`, metaRight, HEADER_H);
+    if (balancing) {
+        ctx.fillText(`Balancing: ${balancing}`, metaRight, HEADER_H - 22);
+    }
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
 
     if (count === 0) {
         ctx.fillStyle = '#888888';
@@ -373,7 +392,7 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
 // ---------------------------------------------------------------------------
 // Preset compilation
 // ---------------------------------------------------------------------------
-function buildPreset(results, name) {
+function buildPreset(results, name, balancing, generatedISO) {
     const killerOverrides = results.map(r => {
         // Start from a deep copy of the template (so all fields are present)
         const entry = JSON.parse(JSON.stringify(OVERRIDE_TEMPLATE));
@@ -425,6 +444,8 @@ function buildPreset(results, name) {
 
     return {
         Name: name,
+        Balancing: balancing || '',
+        GeneratedDate: generatedISO,
         MaxPerkRepetition: 1,
         GlobalNotes: '',
         Tiers: [
@@ -473,6 +494,9 @@ async function processFile(filePath, columns) {
         );
     }
 
+    // Balancing ruleset label (optional)
+    const balancing = (doc.balancing == null) ? '' : String(doc.balancing).trim();
+
     // Universe declarations
     const universeKiller   = doc.universe && doc.universe.killer   !== undefined ? doc.universe.killer   : 'all';
     const universeSurvivor = doc.universe && doc.universe.survivor !== undefined ? doc.universe.survivor : 'all';
@@ -481,7 +505,7 @@ async function processFile(filePath, columns) {
     const allowedKiller   = resolveSide(doc.killerPerks,   universeKiller,   false, filePath);
     const allowedSurvivor = resolveSide(doc.survivorPerks, universeSurvivor, true,  filePath);
 
-    return { killer, allowedKiller, allowedSurvivor };
+    return { killer, allowedKiller, allowedSurvivor, balancing };
 }
 
 async function main() {
@@ -495,21 +519,23 @@ async function main() {
         process.exit(0);
     }
 
-    // Determine output directory
-    const outDir = args.outDir
-        ? path.resolve(args.outDir)
-        : path.join(__dirname, 'output');
+    // Output dir: explicit --out, otherwise next to each input file (per-file).
+    const outDirOverride = args.outDir ? path.resolve(args.outDir) : null;
 
-    if (!fs.existsSync(outDir)) {
-        fs.mkdirSync(outDir, { recursive: true });
-    }
+    // Stamp the generation time once so a batch shares a consistent timestamp
+    const generatedAt = new Date();
+    const generatedISO = generatedAt.toISOString();
+    const dateLabel = generatedISO.slice(0, 10);
 
     const results = [];
 
     for (const filePath of args.files) {
         const absPath = path.resolve(filePath);
         const result = await processFile(absPath, args.columns);
-        const { killer, allowedKiller, allowedSurvivor } = result;
+        const { killer, allowedKiller, allowedSurvivor, balancing } = result;
+
+        const outDir = outDirOverride || path.dirname(absPath);
+        fs.mkdirSync(outDir, { recursive: true });
 
         // Killer slug for filenames
         const killerSlug = killer.Name.replace(/\s+/g, '-');
@@ -517,13 +543,13 @@ async function main() {
         // Render killer-side sheet
         const killerOut = await renderSheet(
             killer, allowedKiller, 'Allowed Killer Perks',
-            killerSlug, args.columns, outDir
+            killerSlug, args.columns, outDir, balancing, dateLabel
         );
 
         // Render survivor-side sheet
         const survivorOut = await renderSheet(
             killer, allowedSurvivor, 'Allowed Survivor Perks',
-            killerSlug, args.columns, outDir
+            killerSlug, args.columns, outDir, balancing, dateLabel
         );
 
         console.log(
@@ -539,7 +565,8 @@ async function main() {
 
     // Compile preset if requested
     if (args.presetPath) {
-        const preset = buildPreset(results, args.presetName);
+        const presetBalancing = results.find(r => r.balancing)?.balancing || '';
+        const preset = buildPreset(results, args.presetName, presetBalancing, generatedISO);
         const presetAbs = path.resolve(args.presetPath);
         fs.writeFileSync(presetAbs, JSON.stringify(preset, null, 4), 'utf8');
         console.log(`\nPreset written → ${presetAbs}`);
