@@ -1,0 +1,46 @@
+# Perk allow-list example: The Trapper
+# Run from the repo root:
+#   node utilities/perk-sheet-generator/perk-sheet-generator.js \
+#        utilities/perk-sheet-generator/examples/the-trapper.yaml \
+#        --out utilities/perk-sheet-generator/output \
+#        --preset utilities/perk-sheet-generator/output/test-preset.json
+
+killer: The Trapper
+
+# Optional label identifying which balancing ruleset these allow-lists come from.
+# Shown on both generated sheets and stored in the --preset JSON.
+balancing: DBDLeague
+
+# universe is optional; defaults to every perk in dbdperks.json for each side.
+# universe:
+#   killer: all
+#   survivor: all
+
+killerPerks:
+  default: allow         # Start with all killer perks allowed
+  deny:                  # Then deny these specific perks
+    - Bamboozle          # The Clown perk (by name)
+    - Dead Man's Switch  # DMS - too oppressive
+    - Starstruck         # The Trickster perk
+    - "Scourge Hook: Monstrous Shrine"   # names with a colon MUST be quoted in YAML
+  allow: []              # No exceptions needed (allow wins over deny if listed in both)
+
+survivorPerks:
+  default: deny          # Start with no survivor perks allowed
+  allow:                 # Then allow these specific perks and groups
+    - Borrowed Time      # BT
+    - Sprint Burst       # SB
+    - Unbreakable        # UB
+    - Adrenaline
+    - Bond
+    - Kindred
+    - Windows of Opportunity
+    - Prove Thyself
+    - We'll Make It
+    - Botany Knowledge
+    - Self-Care
+    - Inner Strength
+    - Resilience
+    - Solidarity
+    - { exhaustion: true }  # Group selector: every exhaustion perk (Sprint Burst is covered but adding the group catches future ones)
+  deny: []
