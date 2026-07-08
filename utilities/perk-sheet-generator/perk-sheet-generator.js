@@ -10,7 +10,8 @@
  *
  * Usage:
  *   node utilities/perk-sheet-generator/perk-sheet-generator.js <file.yaml...>
- *        [--out <dir>] [--columns <n>] [--preset <out.json>] [--name "<name>"]
+ *        [--asset-root <dir>] [--out <dir>] [--columns <n>]
+ *        [--preset <out.json>] [--name "<name>"]
  *
  * Sheets are written next to each input file by default; --out overrides this.
  */
@@ -20,10 +21,20 @@ const path = require('path');
 const yaml = require('js-yaml');
 const { createCanvas, loadImage } = require('canvas');
 
+function readOption(argv, flag) {
+    const index = argv.indexOf(flag);
+    if (index === -1 || !argv[index + 1]) return null;
+    return argv[index + 1];
+}
+
 // ---------------------------------------------------------------------------
 // Paths relative to the REPO ROOT (two levels up from __dirname)
 // ---------------------------------------------------------------------------
-const REPO_ROOT = path.join(__dirname, '..', '..');
+const REPO_ROOT = path.resolve(
+    readOption(process.argv.slice(2), '--asset-root') ||
+    process.env.DBD_BALANCING_TOOL_ROOT ||
+    path.join(__dirname, '..', '..')
+);
 const PERKS_FILE   = path.join(REPO_ROOT, 'public', 'Perks', 'dbdperks.json');
 const KILLERS_FILE = path.join(REPO_ROOT, 'public', 'Killers.json');
 const DEBUG_PRESET = path.join(REPO_ROOT, 'public', 'BalancingPresets', 'DEBUG.json');
@@ -124,6 +135,8 @@ function parseArgs(argv) {
             args.presetPath = argv[++i];
         } else if (a === '--name' && argv[i + 1]) {
             args.presetName = argv[++i];
+        } else if (a === '--asset-root' && argv[i + 1]) {
+            i++;
         } else if (!a.startsWith('--')) {
             args.files.push(a);
         } else {
@@ -532,7 +545,8 @@ async function main() {
     if (args.files.length === 0) {
         console.log(
             'Usage: node perk-sheet-generator.js <file.yaml...>\n' +
-            '       [--out <dir>] [--columns <n>] [--preset <out.json>] [--name "<name>"]'
+            '       [--asset-root <dir>] [--out <dir>] [--columns <n>]\n' +
+            '       [--preset <out.json>] [--name "<name>"]'
         );
         process.exit(0);
     }

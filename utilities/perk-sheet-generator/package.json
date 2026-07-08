@@ -1,0 +1,13 @@
+{
+  "name": "dbd-perk-sheet-generator",
+  "version": "1.0.1",
+  "private": true,
+  "description": "CLI for generating Dead by Daylight perk sheet PNGs from YAML allow-lists.",
+  "bin": {
+    "dbd-perk-sheet": "./perk-sheet-generator.js"
+  },
+  "dependencies": {
+    "canvas": "^3.2.3",
+    "js-yaml": "^4.2.0"
+  }
+}
