@@ -1,0 +1,100 @@
+killer: The Doctor
+balancing: DBD Arena - 1v4 Duo+Duo Rank v0.1
+# universe is optional; defaults to every perk in dbdperks.json for each side.
+# universe:
+#   killer: all
+#   survivor: all
+
+# Map: Grave of Glenvale - Dead Dawg Saloon
+
+killerPerks:
+  default: deny          # Start with all killer perks allowed
+  allow:                 # Then deny these specific perks
+    - Agitation
+    - Bamboozle
+    - Blood Echo
+    - Brutal Strength
+    - Call of Brine
+    - Corrupt Intervention
+    - Coulrophobia
+    - Deadlock
+    - Deathbound
+    - Dying Light
+    - Eruption
+    - Fire Up
+    - Forced Penance
+    - Furtive Chase
+    - Grim Embrace
+    - "Hex: Crowd Control"
+    - "Hex: Ruin"
+    - "Hex: Huntress Lullaby"
+    - "Hex: The Third Seal"
+    - "Hex: Undying"
+    - Hysteria
+    - Infectious Fright
+    - Keep Them Waiting
+    - Leverage
+    - Machine Learning
+    - Monitor and Abuse
+    - Oppression
+    - Overcharge
+    - Pop Goes the Weasel
+    - Rapid Brutality
+    - "Scourge Hook: Gift of Pain"
+    - "Scourge Hook: Pain Resonance"
+    - "Scourge Hook: Jagged Compass"
+    - Sloppy Butcher
+    - Superior Anatomy
+    - Surge
+    - Surveillance
+    - Thanatophobia
+    - Thrilling Tremors
+    - Tinkerer
+    - Trail of Torment
+    - Turn Back the Clock
+
+survivorPerks:
+  default: deny          # Start with no survivor perks allowed
+  allow:                 # Then allow these specific perks and groups
+    - Aftercare
+    - Any Means Necessary
+    - Better than New
+    - Bite the Bullet
+    - Blood Pact
+    - Bond
+    - Counterforce
+    - Detective's Hunch
+    - Distortion
+    - Empathy
+    - Five Moves Ahead
+    - Fixated
+    - Flashbang
+    # - Kindred
+    - Light-Footed
+    - Lucky Star
+    - No Mither
+    - Quick and Quiet
+    - Repressed Alliance
+    - Saboteur
+    - Urban Evasion
+    - Visionary
+    - Windows of Opportunity
+  deny: []
+
+items:
+  # Flashlight:
+  #   default: deny
+  #   allow:
+  #     - Sport Flashlight
+  #   addons:
+  #     default: deny
+  #     allow:
+  #       - {rarity: "Common"}
+  Firecracker:
+    allow:
+      - Firecracker
+
+addons:
+  default: allow         # Start with every add-on allowed
+  deny:
+    - {rarity: "Ultra Rare"}
