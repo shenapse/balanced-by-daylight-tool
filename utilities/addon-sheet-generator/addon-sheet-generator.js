@@ -394,7 +394,11 @@ async function renderSheet(killer, allowedAddons, killerSlug, columns, outDir, b
     for (const sec of sections) for (const a of sec.addons) flat.push(a);
     const artImages = await Promise.allSettled(flat.map(a => loadImage(addonIconPng(a))));
     const artByGlobalId = new Map();
-    flat.forEach((a, i) => artByGlobalId.set(a.globalID, artImages[i]));
+    const missingArt = []; // add-ons whose PNG failed to load (drawn as placeholders)
+    flat.forEach((a, i) => {
+        artByGlobalId.set(a.globalID, artImages[i]);
+        if (artImages[i].status !== 'fulfilled') missingArt.push(a);
+    });
 
     const gridX = MARGIN + LABEL_W + GAP;
 
@@ -422,6 +426,16 @@ async function renderSheet(killer, allowedAddons, killerSlug, columns, outDir, b
                 ctx.fillStyle = '#333333';
                 ctx.fillRect(x, y, ICON, ICON);
             }
+        }
+    }
+
+    if (missingArt.length > 0) {
+        console.warn(
+            `WARN: ${missingArt.length} add-on icon(s) missing from canvas-image-library ` +
+            `(drawn as placeholder):`
+        );
+        for (const a of missingArt) {
+            console.warn(`  - ${killer.Name} / ${a.Name} → ${addonIconPng(a)}`);
         }
     }
 

@@ -1,0 +1,111 @@
+killer: The Mastermind
+balancing: DBD Arena - 1v4 Duo+Duo Rank v0.1
+# universe is optional; defaults to every perk in dbdperks.json for each side.
+# universe:
+#   killer: all
+#   survivor: all
+
+# Map: Cole Tower
+
+killerPerks:
+  default: deny          # Start with all killer perks allowed
+  allow:                 # Then deny these specific perks
+    - Agitation
+    - Bamboozle
+    - Blood Echo
+    - Brutal Strength
+    - Call of Brine
+    - Corrupt Intervention
+    - Coulrophobia
+    - Deadlock
+    - Deathbound
+    - Dying Light
+    - Eruption
+    - Forced Penance
+    - Furtive Chase
+    - Grim Embrace
+    - "Hex: Crowd Control"
+    - "Hex: Huntress Lullaby"
+    - "Hex: Ruin"
+    - "Hex: The Third Seal"
+    - "Hex: Undying"
+    - Hysteria
+    - Infectious Fright
+    - Keep Them Waiting
+    - Leverage
+    - Machine Learning
+    - Monitor and Abuse
+    - Oppression
+    - Overcharge
+    - Pop Goes the Weasel
+    - Rapid Brutality
+    - "Scourge Hook: Gift of Pain"
+    - "Scourge Hook: Pain Resonance"
+    - "Scourge Hook: Jagged Compass"
+    - Sloppy Butcher
+    - Superior Anatomy
+    - Surge
+    - Surveillance
+    - Thanatophobia
+    - Thrilling Tremors
+    - Tinkerer
+    - Trail of Torment
+    - Turn Back the Clock
+
+survivorPerks:
+  default: deny          # Start with no survivor perks allowed
+  allow:                 # Then allow these specific perks and groups
+    - Aftercare
+    - Any Means Necessary
+    - Bada Bada Boom
+    - Balanced Landing
+    - Better than New
+    - Bite the Bullet
+    - Blood Pact
+    - Boil Over
+    - Bond
+    - Calm Spirit
+    - Chemical Trap
+    - Counterforce
+    - Detective's Hunch
+    - Distortion
+    - Diversion
+    - Empathy
+    - Five Moves Ahead
+    - Fixated
+    - Flashbang
+    # - Head On
+    # - Iron Will
+    # - Kindred
+    - Light-Footed
+    - Lucky Star
+    - No Mither
+    - No One Left Behind
+    - Quick and Quiet
+    - Repressed Alliance
+    - Residual Manifest
+    - Saboteur
+    - Smash Hit
+    - Tenacity
+    - Urban Evasion
+    - Visionary
+    - Windows of Opportunity
+  deny: []
+
+items:
+  # Flashlight:
+  #   default: deny
+  #   allow:
+  #     - Sport Flashlight
+  #   addons:
+  #     default: deny
+  #     allow:
+  #       - {rarity: "Common"}
+  Firecracker:
+    allow:
+      - Firecracker
+
+addons:
+  default: allow         # Start with every add-on allowed
+  deny:
+    - {rarity: "Ultra Rare"}
