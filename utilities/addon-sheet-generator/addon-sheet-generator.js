@@ -45,7 +45,6 @@ const KILLERS_FILE = path.join(REPO_ROOT, 'public', 'Killers.json');
 const DEBUG_PRESET = path.join(REPO_ROOT, 'public', 'BalancingPresets', 'DEBUG.json');
 const PNG_LIBRARY  = path.join(REPO_ROOT, 'canvas-image-library');
 const PNG_PORTRAITS = path.join(PNG_LIBRARY, 'Portraits');
-const RARITY_DIR    = path.join(REPO_ROOT, 'utilities', 'addon-combine-tool', 'rarity-images');
 
 // ---------------------------------------------------------------------------
 // Rarity model
@@ -277,20 +276,6 @@ function portraitPng(killer) {
     return path.join(PNG_PORTRAITS, 'Blank.png');
 }
 
-/** Load the five rarity-border images once; missing ones resolve to null. */
-async function loadRarityBorders() {
-    const borders = [];
-    for (let r = 0; r < RARITY_NAMES.length; r++) {
-        const p = path.join(RARITY_DIR, `${r}.png`);
-        try {
-            borders[r] = await loadImage(p);
-        } catch (e) {
-            borders[r] = null;
-        }
-    }
-    return borders;
-}
-
 // ---------------------------------------------------------------------------
 // Image rendering
 // ---------------------------------------------------------------------------
@@ -404,8 +389,6 @@ async function renderSheet(killer, allowedAddons, killerSlug, columns, outDir, b
     }
 
     // --- Add-on sections ---
-    const borders = await loadRarityBorders();
-
     // Preload all add-on art (flattened, in render order)
     const flat = [];
     for (const sec of sections) for (const a of sec.addons) flat.push(a);
@@ -429,15 +412,13 @@ async function renderSheet(killer, allowedAddons, killerSlug, columns, outDir, b
             const x = gridX + col * (ICON + GAP);
             const y = sec.y + row * (ICON + GAP);
 
-            // Rarity border underneath
-            const border = borders[sec.rarity];
-            if (border) ctx.drawImage(border, x, y, ICON, ICON);
-
+            // The add-on PNG already has its rarity plate baked in (produced by
+            // addon-combine-tool), so draw it bare — like the perk/item generators.
             const art = artByGlobalId.get(sec.addons[i].globalID);
             if (art && art.status === 'fulfilled') {
                 ctx.drawImage(art.value, x, y, ICON, ICON);
-            } else if (!border) {
-                // No border and no art: draw a placeholder box
+            } else {
+                // No art on disk: draw a placeholder box
                 ctx.fillStyle = '#333333';
                 ctx.fillRect(x, y, ICON, ICON);
             }
