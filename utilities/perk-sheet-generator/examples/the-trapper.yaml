@@ -30,6 +30,8 @@ survivorPerks:
   allow:                 # Then allow these specific perks and groups
     - Borrowed Time      # BT
     - Sprint Burst       # SB
+    - Lithe              # exhaustion perk (for the pick-limit example below)
+    - Balanced Landing   # exhaustion perk (for the pick-limit example below)
     - Unbreakable        # UB
     - Adrenaline
     - Bond
@@ -79,3 +81,28 @@ survivorRepetitionLimits:
     perks:
       - Self-Care
       - Botany Knowledge
+
+# Pick limits (image-only — rendered on the sheets, NOT written to --preset).
+# "Pick at most N perks from this list." A group may bring at most `max` perks drawn
+# from `perks` in total. If `max` equals (list length - 1) the limit reduces to a
+# combination ban ("not all of them together") and is rendered under Combination Bans
+# instead; if `max` is at least the list length it is vacuous and dropped.
+#   scope: survivor | duo | team   (killerPickLimits take no scope — the killer's build)
+#   max:   positive integer
+#   perks: a list of 2+ perk names to choose from
+survivorPickLimits:
+  - scope: duo
+    max: 1                 # a duo may bring at most one of these exhaustion perks
+    perks:
+      - Sprint Burst
+      - Lithe
+      - Balanced Landing
+
+# Killer pick limits apply to the killer's own 4-perk build (single implicit scope).
+killerPickLimits:
+  - max: 2                 # at most two of these gen-slowdown perks in one build
+    perks:
+      - Pop Goes the Weasel
+      - Corrupt Intervention
+      - Overcharge
+      - Eruption

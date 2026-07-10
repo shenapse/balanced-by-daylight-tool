@@ -64,33 +64,34 @@ const CHIP_W            = 156;  // width of the scope chip
 const REP_ICON_GAP = 24;   // horizontal gap between subset icons (no "+" glyph)
 const REP_PILL_H   = 34;   // height of the "ALL PERKS" pill
 
-// Per-scope presentation: chip label, chip colour, and the plain-English rule.
+// Per-scope presentation: chip label + chip colour. The concrete render forms
+// (combination ban / pick limit / duplicate limit) supply their own plain-English
+// rule sentences via the *RuleText helpers further below.
 const SCOPE_META = {
-    survivor: {
-        label: 'ONE SURVIVOR', color: '#f0b429',
-        rule: 'One survivor may not bring both perks.',
-    },
-    duo: {
-        label: 'DUO', color: '#e8823a',
-        rule: 'Neither duo may bring both perks between its two members.',
-    },
-    team: {
-        label: 'WHOLE TEAM', color: '#e5484d',
-        rule: 'If one survivor brings one perk, no other survivor may bring the other.',
-    },
-    build: {
-        label: 'BUILD', color: '#8a8f98',
-        rule: 'The killer may not bring both perks in one build.',
-    },
+    survivor: { label: 'ONE SURVIVOR', color: '#f0b429' },
+    duo:      { label: 'DUO',          color: '#e8823a' },
+    team:     { label: 'WHOLE TEAM',   color: '#e5484d' },
+    build:    { label: 'BUILD',        color: '#8a8f98' },
 };
 
 // Fixed scope order for the survivor side (matches the increasing strictness).
 const SURVIVOR_COMBO_SCOPES = ['survivor', 'duo', 'team'];
 
+// Scopes an author may attach to a survivor-side pick limit.
+const PICK_SURVIVOR_SCOPES = ['survivor', 'duo', 'team'];
+
 // Scopes valid for repetition limits (survivor side only). A per-single-survivor
 // scope is meaningless here — one survivor can't bring the same perk twice — so only
 // duo and team apply. Fixed order = rendering order (increasing group size).
 const REPETITION_SCOPES = ['duo', 'team'];
+
+// Global scope ordering used when rendering the classified limit buckets. Killer-side
+// limits use the internal 'build' scope (the killer's single 4-perk build).
+const SCOPE_ORDER = ['survivor', 'duo', 'team', 'build'];
+function scopeRank(scope) {
+    const i = SCOPE_ORDER.indexOf(scope);
+    return i === -1 ? SCOPE_ORDER.length : i;
+}
 
 // ---------------------------------------------------------------------------
 // Data loading
@@ -527,6 +528,222 @@ function resolveRepetitionLimits(config, allowedPerks, filePath) {
 }
 
 /**
+ * Resolve pick limits ("pick at most N perks from this list") into generalized-model
+ * IR entries { scope, count: 'total', max, perks: [perkObj, …] }.
+ *
+ * Survivor config is a list of { scope, max, perks } (scope survivor / duo / team);
+ * killer config is a list of { max, perks } under the single implicit 'build' scope.
+ * `perks` is required and must be an explicit list of 2+ perk names (you pick FROM a
+ * list) — group selectors ({exhaustion}/{tag}) are not allowed, same as combos.
+ *
+ * @param {*} config - doc.survivorPickLimits / doc.killerPickLimits (a list of objects)
+ * @param {boolean} isSurvivor - true for the survivor side
+ * @param {Array} allowedPerks - the side's allowed perks (for the moot warning)
+ * @param {string} filePath - for error messages
+ * @returns {Array} IR entries [{ scope, count:'total', max, perks }]
+ */
+function resolvePickLimits(config, isSurvivor, allowedPerks, filePath) {
+    if (config == null) return [];
+
+    const label = isSurvivor ? 'survivorPickLimits' : 'killerPickLimits';
+    const shape = isSurvivor ? '{ scope, max, perks }' : '{ max, perks }';
+    if (!Array.isArray(config)) {
+        fatal(`"${label}" must be a list of ${shape} objects in file "${filePath}".`);
+    }
+
+    const sideAll    = allPerks.filter(p => p.survivorPerk === isSurvivor);
+    const lookup     = buildPerkLookup(sideAll);
+    const allowedIds = new Set(allowedPerks.map(p => p.id));
+
+    const out = [];
+
+    for (const entry of config) {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            fatal(`Each "${label}" entry must be a ${shape} object in file "${filePath}", got ${JSON.stringify(entry)}.`);
+        }
+
+        // scope
+        let scope;
+        if (isSurvivor) {
+            scope = entry.scope;
+            if (!PICK_SURVIVOR_SCOPES.includes(scope)) {
+                fatal(
+                    `Invalid pick-limit scope ${JSON.stringify(scope)} in file "${filePath}". ` +
+                    `Valid scopes: ${PICK_SURVIVOR_SCOPES.join(', ')}.`
+                );
+            }
+        } else {
+            if (entry.scope !== undefined && entry.scope !== 'killer' && entry.scope !== 'build') {
+                fatal(
+                    `"killerPickLimits" entries take no scope (the killer is a single build); ` +
+                    `got scope ${JSON.stringify(entry.scope)} in file "${filePath}".`
+                );
+            }
+            scope = 'build';
+        }
+
+        // max
+        const max = entry.max;
+        if (typeof max !== 'number' || !Number.isInteger(max) || max < 1) {
+            fatal(
+                `Pick-limit "max" (scope "${scope}") must be a positive integer in ` +
+                `file "${filePath}", got ${JSON.stringify(max)}.`
+            );
+        }
+
+        // perks: required explicit list of 2+ names
+        const perksDecl = entry.perks;
+        if (!Array.isArray(perksDecl)) {
+            fatal(
+                `Pick-limit "perks" (scope "${scope}") must be a list of perk names in ` +
+                `file "${filePath}", got ${JSON.stringify(perksDecl)}.`
+            );
+        }
+        const perks = perksDecl.map(sel => {
+            if (sel && typeof sel === 'object' &&
+                (sel.exhaustion === true || typeof sel.tag === 'string')) {
+                fatal(
+                    `Group selectors ({ exhaustion } / { tag }) are not allowed inside a ` +
+                    `pick limit (scope "${scope}") in file "${filePath}".`
+                );
+            }
+            return matchSelector(sel, sideAll, lookup, filePath)[0];
+        });
+        if (perks.length < 2) {
+            fatal(
+                `Pick limit (scope "${scope}") in file "${filePath}" needs at least 2 perks to ` +
+                `choose from, got ${perks.length}: ${JSON.stringify(perksDecl)}.`
+            );
+        }
+        for (const p of perks) {
+            if (!allowedIds.has(p.id)) {
+                console.warn(
+                    `WARNING: pick-limit perk "${p.name}" (scope "${scope}") is not in the allowed ` +
+                    `set in "${filePath}"; the limit is moot because that perk is already ` +
+                    `individually banned.`
+                );
+            }
+        }
+
+        out.push({ scope, count: 'total', max, perks });
+    }
+
+    return out;
+}
+
+// ---------------------------------------------------------------------------
+// Generalized perk-limit model (internal IR) + classification
+// ---------------------------------------------------------------------------
+// Every authoring sugar lowers to the same IR shape { scope, count, max, perks }:
+//   count 'perPerk' -> each perk in `perks` may be brought by at most `max` members of
+//                      the scope group           (the DUPLICATE family)
+//   count 'total'   -> the scope group may bring at most `max` perks drawn from `perks`
+//                      in total                  (the PICK / COMBO family)
+// The IR is never rendered directly; classifyLimits() reduces each entry to exactly one
+// concrete render target (duplicate / pick / combo), which is what the sheets draw.
+
+// Lower resolved combination bans ({ scope, perks }) to IR. A combo of N perks means
+// "not all N together", i.e. at most N-1 of them (count: total, max = N-1).
+function comboBansToLimits(combos) {
+    return combos.map(c => ({ scope: c.scope, count: 'total', max: c.perks.length - 1, perks: c.perks }));
+}
+
+// Lower resolved repetition limits ({ scope, max, perks|null }) to IR (count: perPerk).
+function repetitionLimitsToLimits(reps) {
+    return reps.map(r => ({ scope: r.scope, count: 'perPerk', max: r.max, perks: r.perks }));
+}
+
+/**
+ * Reduce a list of generalized IR limits into the three concrete render buckets.
+ * Vacuous / unsupported entries are warned about and dropped. Each bucket is sorted by
+ * SCOPE_ORDER (stable within a scope) so sections render in a consistent order.
+ *
+ * @param {Array} limits - IR entries { scope, count, max, perks }
+ * @param {string} filePath - for warning messages
+ * @returns {{ duplicate: Array, pick: Array, combo: Array }}
+ */
+function classifyLimits(limits, filePath) {
+    const duplicate = [];
+    const pick = [];
+    const combo = [];
+
+    for (const lim of limits) {
+        if (lim.count === 'perPerk') {
+            duplicate.push(lim);
+            continue;
+        }
+        // count === 'total'
+        if (!lim.perks) {
+            console.warn(
+                `WARNING: a total-count limit over all perks (scope "${lim.scope}") in ` +
+                `"${filePath}" is a whole-loadout size cap, not a supported render target; skipping.`
+            );
+            continue;
+        }
+        const len = lim.perks.length;
+        if (lim.max >= len) {
+            console.warn(
+                `WARNING: limit (scope "${lim.scope}", max ${lim.max}) over ${len} perks in ` +
+                `"${filePath}" is vacuous (max is at least the number of perks); skipping.`
+            );
+            continue;
+        }
+        if (lim.max === len - 1) combo.push(lim); // "not all of them together"
+        else                     pick.push(lim);  // 1 <= max < len - 1: "pick at most N"
+    }
+
+    const byScope = (a, b) => scopeRank(a.scope) - scopeRank(b.scope);
+    duplicate.sort(byScope);
+    pick.sort(byScope);
+    combo.sort(byScope);
+    return { duplicate, pick, combo };
+}
+
+// ---------------------------------------------------------------------------
+// Plain-English rule sentences for the concrete render forms
+// ---------------------------------------------------------------------------
+/**
+ * Rule sentence for a combination-ban group (drawn once per scope). Kept identical to
+ * the original wording for the common all-pairs case; generalizes to "all of these"
+ * when any combo in the group has more than two perks.
+ */
+function comboGroupRuleText(scope, combos) {
+    const allPairs = combos.every(c => c.perks.length === 2);
+    switch (scope) {
+        case 'survivor':
+            return allPairs
+                ? 'One survivor may not bring both perks.'
+                : 'One survivor may not bring all of these together.';
+        case 'duo':
+            return allPairs
+                ? 'Neither duo may bring both perks between its two members.'
+                : 'A duo may not bring all of these between its two members.';
+        case 'team':
+            return allPairs
+                ? 'If one survivor brings one perk, no other survivor may bring the other.'
+                : 'The team may not bring all of these across its survivors.';
+        case 'build':
+            return allPairs
+                ? 'The killer may not bring both perks in one build.'
+                : 'The killer may not bring all of these in one build.';
+        default:
+            return 'These perks may not be brought together.';
+    }
+}
+
+/** Rule sentence for a single pick limit, keyed off scope and max. */
+function pickRuleText(rule) {
+    const atMost = rule.max === 1 ? 'at most one' : `at most ${rule.max}`;
+    switch (rule.scope) {
+        case 'survivor': return `One survivor may bring ${atMost} of these perks.`;
+        case 'duo':      return `Each duo may bring ${atMost} of these perks between its two members.`;
+        case 'team':     return `The team may bring ${atMost} of these perks.`;
+        case 'build':    return `The killer may bring ${atMost} of these perks in one build.`;
+        default:         return `${atMost.charAt(0).toUpperCase()}${atMost.slice(1)} of these perks may be brought.`;
+    }
+}
+
+/**
  * Build a draw-ready layout for the combination-ban section, computing the total
  * height and the minimum width it needs. Uses `measure` (a throwaway 2d context)
  * for text metrics. Returns null when there are no combos.
@@ -545,7 +762,8 @@ function buildComboLayout(comboBans, measure) {
     let width = 0;
     for (const g of groups) {
         measure.font = '400 14pt sans-serif';
-        const ruleW = measure.measureText(g.meta.rule).width;
+        g.ruleText = comboGroupRuleText(g.scope, g.combos);
+        const ruleW = measure.measureText(g.ruleText).width;
         width = Math.max(width, MARGIN + CHIP_W + 16 + Math.ceil(ruleW) + MARGIN);
 
         for (const combo of g.combos) {
@@ -659,7 +877,7 @@ function drawComboSection(ctx, layout, startY, iconMap, width) {
         ctx.fillStyle = '#cccccc';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        ctx.fillText(g.meta.rule, MARGIN + CHIP_W + 16, y + chipH / 2);
+        ctx.fillText(g.ruleText, MARGIN + CHIP_W + 16, y + chipH / 2);
         ctx.textBaseline = 'top';
         y += chipH + 10;
 
@@ -853,13 +1071,130 @@ function drawRepetitionSection(ctx, layout, startY, iconMap, width) {
     }
 }
 
-async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns, outDir, balancing, dateLabel, comboBans, repetitionLimits) {
+/**
+ * Build a draw-ready layout for the pick-limit section. A pick limit always targets an
+ * explicit list of perks, so each rule renders as a scope chip + rule sentence + an icon
+ * row of the listed perks (same subset-row style as a duplicate limit, no "+" glyph).
+ * Returns null when there are no pick limits.
+ */
+function buildPickLayout(picks, measure) {
+    if (!picks || picks.length === 0) return null;
+
+    const rules = [];
+    let width = 0;
+
+    for (const rule of picks) {
+        const meta = SCOPE_META[rule.scope];
+        const text = pickRuleText(rule);
+
+        measure.font = '400 14pt sans-serif';
+        const textW = measure.measureText(text).width;
+        width = Math.max(width, MARGIN + CHIP_W + 16 + Math.ceil(textW) + MARGIN);
+
+        measure.font = '400 12pt sans-serif';
+        let rowW = MARGIN * 2;
+        const slots = rule.perks.map(p => {
+            const nameW = measure.measureText(p.name).width;
+            const slotW = Math.max(COMBO_ICON, Math.ceil(nameW) + 8);
+            rowW += slotW + REP_ICON_GAP;
+            return { perk: p, slotW };
+        });
+        rowW -= REP_ICON_GAP; // no trailing gap after the last icon
+        width = Math.max(width, rowW);
+        const contentH = COMBO_ICON + COMBO_NAME_H;
+
+        rules.push({ ...rule, meta, text, slots, contentH });
+    }
+
+    // Height: section gap + divider + title + subtitle, then per rule a chip header
+    // and its icon row.
+    let height = COMBO_SECTION_GAP + 2 + 16 + 40 + 24 + 8;
+    for (const r of rules) {
+        height += 12 + 30 + 10;
+        height += r.contentH + COMBO_ROW_GAP;
+    }
+
+    return { rules, width, height };
+}
+
+/**
+ * Draw the pick-limit section starting at `startY`. `iconMap` maps perk id -> loaded
+ * Image (or null). Mirrors drawRepetitionSection's subset-row rendering.
+ */
+function drawPickSection(ctx, layout, startY, iconMap, width) {
+    let y = startY + COMBO_SECTION_GAP;
+
+    // Divider between the previous section and this one
+    ctx.strokeStyle = '#2a2833';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(MARGIN, y + 1);
+    ctx.lineTo(width - MARGIN, y + 1);
+    ctx.stroke();
+    y += 2 + 16;
+
+    // Title + subtitle
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillStyle = TEXT_COLOR;
+    ctx.font = '700 22pt sans-serif';
+    ctx.fillText('Pick Limits', MARGIN, y);
+    y += 40;
+    ctx.font = '400 13pt sans-serif';
+    ctx.fillStyle = '#999999';
+    ctx.fillText('how many perks you may choose from a group', MARGIN, y);
+    y += 24 + 8;
+
+    for (const rule of layout.rules) {
+        y += 12;
+        const chipH = 30;
+        drawScopeChip(ctx, MARGIN, y, CHIP_W, chipH, rule.meta.color, rule.meta.label);
+        ctx.font = '400 14pt sans-serif';
+        ctx.fillStyle = '#cccccc';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(rule.text, MARGIN + CHIP_W + 16, y + chipH / 2);
+        ctx.textBaseline = 'top';
+        y += chipH + 10;
+
+        let x = MARGIN;
+        const iconY = y;
+        rule.slots.forEach(slot => {
+            const cx = x + slot.slotW / 2;
+            const ix = Math.round(cx - COMBO_ICON / 2);
+            const img = iconMap.get(slot.perk.id);
+            if (img) {
+                ctx.drawImage(img, ix, iconY, COMBO_ICON, COMBO_ICON);
+            } else {
+                ctx.fillStyle = '#333333';
+                ctx.fillRect(ix, iconY, COMBO_ICON, COMBO_ICON);
+            }
+            ctx.font = '400 12pt sans-serif';
+            ctx.fillStyle = '#dddddd';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(slot.perk.name, Math.round(cx), iconY + COMBO_ICON + 4);
+            x += slot.slotW + REP_ICON_GAP;
+        });
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        y += rule.contentH + COMBO_ROW_GAP;
+    }
+}
+
+async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns, outDir, balancing, dateLabel, limits) {
+    // Classified render buckets (see classifyLimits). Rendered in this order below the
+    // grid: duplicate limits -> pick limits -> combination bans.
+    const duplicateLimits = (limits && limits.duplicate) || [];
+    const pickLimits      = (limits && limits.pick)      || [];
+    const comboBans       = (limits && limits.combo)     || [];
+
     const count = allowedPerks.length;
     const rows  = count > 0 ? Math.ceil(count / columns) : 0;
     const gridW = columns * ICON + (columns - 1) * GAP;
     const gridH = rows > 0 ? rows * ICON + (rows - 1) * GAP : 0;
     // When nothing is allowed we still reserve a line for the "None allowed" note
-    // so the combo section (if any) does not overlap it.
+    // so the limit sections (if any) do not overlap it.
     const noteH = count === 0 ? 40 : 0;
 
     // Load the portrait up front so its width feeds into the layout below
@@ -891,37 +1226,46 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
     const subW = measure.measureText(sideLabel).width;
     measure.font = '400 16pt sans-serif';
     const countW = measure.measureText(`(${count} perks)`).width;
-    const comboCount = comboBans ? comboBans.length : 0;
-    const comboCountW = comboCount
-        ? measure.measureText(`(${comboCount} combination ban${comboCount === 1 ? '' : 's'})`).width
-        : 0;
-    const repCount = repetitionLimits ? repetitionLimits.length : 0;
     measure.font = '400 14pt sans-serif';
+    const repCount = duplicateLimits.length;
     const repCountW = repCount
         ? measure.measureText(`(${repCount} duplicate limit${repCount === 1 ? '' : 's'})`).width
         : 0;
+    const pickCount = pickLimits.length;
+    const pickCountW = pickCount
+        ? measure.measureText(`(${pickCount} pick limit${pickCount === 1 ? '' : 's'})`).width
+        : 0;
+    const comboCount = comboBans.length;
+    const comboCountW = comboCount
+        ? measure.measureText(`(${comboCount} combination ban${comboCount === 1 ? '' : 's'})`).width
+        : 0;
     measure.font = '400 16pt sans-serif';
-    const leftMaxW = Math.max(titleW, subW, countW, comboCountW, repCountW);
+    const leftMaxW = Math.max(titleW, subW, countW, repCountW, pickCountW, comboCountW);
     measure.font = '400 13pt sans-serif';
     const genW = measure.measureText(`Generated: ${dateLabel}`).width;
     const balW = balancing ? measure.measureText(`Balancing: ${balancing}`).width : 0;
     const metaMaxW = Math.max(genW, balW);
+
+    // Duplicate-limit section layout (null when there are none)
+    const repLayout = buildRepetitionLayout(duplicateLimits, measure);
+    const repH = repLayout ? repLayout.height : 0;
+    const repW = repLayout ? repLayout.width : 0;
+
+    // Pick-limit section layout (null when there are none)
+    const pickLayout = buildPickLayout(pickLimits, measure);
+    const pickH = pickLayout ? pickLayout.height : 0;
+    const pickW = pickLayout ? pickLayout.width : 0;
 
     // Combination-ban section layout (null when there are no combos)
     const comboLayout = buildComboLayout(comboBans, measure);
     const comboH = comboLayout ? comboLayout.height : 0;
     const comboW = comboLayout ? comboLayout.width : 0;
 
-    // Repetition-limit section layout (null when there are no limits)
-    const repLayout = buildRepetitionLayout(repetitionLimits, measure);
-    const repH = repLayout ? repLayout.height : 0;
-    const repW = repLayout ? repLayout.width : 0;
-
     const leftNeed = textX + leftMaxW + MARGIN;
     const metaNeed = textX + metaMaxW + MARGIN; // textX floor also clears the portrait
-    const width = Math.ceil(Math.max(bodyWidth, leftNeed, metaNeed, comboW, repW));
+    const width = Math.ceil(Math.max(bodyWidth, leftNeed, metaNeed, repW, pickW, comboW));
 
-    const height = HEADER_H + noteH + gridH + MARGIN * 2 + comboH + repH;
+    const height = HEADER_H + noteH + gridH + MARGIN * 2 + repH + pickH + comboH;
 
     const canvas = createCanvas(width, height);
     const ctx    = canvas.getContext('2d');
@@ -948,22 +1292,17 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
     ctx.font = '400 16pt sans-serif';
     ctx.fillStyle = '#aaaaaa';
     ctx.fillText(`(${count} perks)`, textX, MARGIN + 84);
-    if (repCount) {
+    // Restriction counts, stacked in render order (duplicate -> pick -> combo).
+    let countLineY = MARGIN + 116;
+    const drawCountLine = (n, singular) => {
         ctx.font = '400 14pt sans-serif';
         ctx.fillStyle = '#888888';
-        ctx.fillText(
-            `(${repCount} duplicate limit${repCount === 1 ? '' : 's'})`,
-            textX, MARGIN + 116
-        );
-    }
-    if (comboCount) {
-        ctx.font = '400 14pt sans-serif';
-        ctx.fillStyle = '#888888';
-        ctx.fillText(
-            `(${comboCount} combination ban${comboCount === 1 ? '' : 's'})`,
-            textX, MARGIN + (repCount ? 140 : 116)
-        );
-    }
+        ctx.fillText(`(${n} ${singular}${n === 1 ? '' : 's'})`, textX, countLineY);
+        countLineY += 24;
+    };
+    if (repCount)   drawCountLine(repCount, 'duplicate limit');
+    if (pickCount)  drawCountLine(pickCount, 'pick limit');
+    if (comboCount) drawCountLine(comboCount, 'combination ban');
 
     // Provenance: balancing ruleset + generation timestamp, bottom-aligned to portrait
     ctx.font = '400 13pt sans-serif';
@@ -1007,42 +1346,36 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
         }
     }
 
-    // --- Repetition-limit section (directly below the grid / note) ---
-    if (repLayout) {
-        // Preload subset icons (deduped by perk id; all-perks rules have no icons)
-        const repPerks = [...new Map(
-            repetitionLimits.flatMap(r => r.perks || []).map(p => [p.id, p])
-        ).values()];
-        const repIconResults = await Promise.allSettled(
-            repPerks.map(p => loadImage(perkIconPng(p)))
-        );
+    // Helper: preload a set of perk icons into an id -> Image (or null) map.
+    const loadIconMap = async (perks) => {
+        const uniq = [...new Map(perks.map(p => [p.id, p])).values()];
+        const results = await Promise.allSettled(uniq.map(p => loadImage(perkIconPng(p))));
         const iconMap = new Map();
-        repPerks.forEach((p, i) => {
-            const r = repIconResults[i];
-            iconMap.set(p.id, r.status === 'fulfilled' ? r.value : null);
+        uniq.forEach((p, i) => {
+            iconMap.set(p.id, results[i].status === 'fulfilled' ? results[i].value : null);
         });
+        return iconMap;
+    };
 
-        const sectionStartY = HEADER_H + MARGIN + noteH + gridH;
-        drawRepetitionSection(ctx, repLayout, sectionStartY, iconMap, width);
+    const gridBottom = HEADER_H + MARGIN + noteH + gridH;
+
+    // --- Duplicate-limit section (directly below the grid / note) ---
+    if (repLayout) {
+        // all-perks rules have no icons; subset rules contribute their listed perks
+        const iconMap = await loadIconMap(duplicateLimits.flatMap(r => r.perks || []));
+        drawRepetitionSection(ctx, repLayout, gridBottom, iconMap, width);
     }
 
-    // --- Combination-ban section (below the repetition section) ---
-    if (comboLayout) {
-        // Preload combo icons (deduped by perk id)
-        const comboPerks = [...new Map(
-            comboBans.flatMap(c => c.perks).map(p => [p.id, p])
-        ).values()];
-        const comboIconResults = await Promise.allSettled(
-            comboPerks.map(p => loadImage(perkIconPng(p)))
-        );
-        const iconMap = new Map();
-        comboPerks.forEach((p, i) => {
-            const r = comboIconResults[i];
-            iconMap.set(p.id, r.status === 'fulfilled' ? r.value : null);
-        });
+    // --- Pick-limit section (below the duplicate section) ---
+    if (pickLayout) {
+        const iconMap = await loadIconMap(pickLimits.flatMap(r => r.perks));
+        drawPickSection(ctx, pickLayout, gridBottom + repH, iconMap, width);
+    }
 
-        const sectionStartY = HEADER_H + MARGIN + noteH + gridH + repH;
-        drawComboSection(ctx, comboLayout, sectionStartY, iconMap, width);
+    // --- Combination-ban section (below the pick section) ---
+    if (comboLayout) {
+        const iconMap = await loadIconMap(comboBans.flatMap(c => c.perks));
+        drawComboSection(ctx, comboLayout, gridBottom + repH + pickH, iconMap, width);
     }
 
     const sidePart = sideLabel === 'Allowed Killer Perks' ? 'killer' : 'survivor';
@@ -1055,8 +1388,9 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
 // Preset compilation
 // ---------------------------------------------------------------------------
 function buildPreset(results, name, balancing, generatedISO) {
-    // NOTE: combination bans (survivorComboBans / killerComboBans) and repetition
-    // limits (survivorRepetitionLimits) are intentionally image-only and are NOT
+    // NOTE: all perk-limit sugar (combination bans, repetition/duplicate limits, and
+    // pick limits — survivorComboBans / killerComboBans / survivorRepetitionLimits /
+    // survivorPickLimits / killerPickLimits) is intentionally image-only and is NOT
     // emitted here — the live checker has no duo/team scope and its only repetition
     // surface is the top-level MaxPerkRepetition (no per-subset/scope concept), so
     // they would have no enforcement path. The preset carries individual bans only.
@@ -1172,14 +1506,23 @@ async function processFile(filePath, columns) {
     const allowedKiller   = resolveSide(doc.killerPerks,   universeKiller,   false, filePath);
     const allowedSurvivor = resolveSide(doc.survivorPerks, universeSurvivor, true,  filePath);
 
-    // Resolve combination bans (image-only; not written into the preset)
-    const survivorCombos = resolveComboBans(doc.survivorComboBans, true,  allowedSurvivor, filePath);
-    const killerCombos   = resolveComboBans(doc.killerComboBans,   false, allowedKiller,   filePath);
+    // Resolve every authoring sugar, lower each into the generalized perk-limit IR,
+    // then classify into concrete render buckets. Everything here is image-only and is
+    // not written into the preset (see buildPreset).
+    const survivorLimits = [
+        ...comboBansToLimits(resolveComboBans(doc.survivorComboBans, true, allowedSurvivor, filePath)),
+        ...repetitionLimitsToLimits(resolveRepetitionLimits(doc.survivorRepetitionLimits, allowedSurvivor, filePath)),
+        ...resolvePickLimits(doc.survivorPickLimits, true, allowedSurvivor, filePath),
+    ];
+    const killerLimits = [
+        ...comboBansToLimits(resolveComboBans(doc.killerComboBans, false, allowedKiller, filePath)),
+        ...resolvePickLimits(doc.killerPickLimits, false, allowedKiller, filePath),
+    ];
 
-    // Resolve repetition limits (survivor side only; image-only, like combos)
-    const repetitionLimits = resolveRepetitionLimits(doc.survivorRepetitionLimits, allowedSurvivor, filePath);
+    const survivorBuckets = classifyLimits(survivorLimits, filePath);
+    const killerBuckets   = classifyLimits(killerLimits, filePath);
 
-    return { killer, allowedKiller, allowedSurvivor, balancing, survivorCombos, killerCombos, repetitionLimits };
+    return { killer, allowedKiller, allowedSurvivor, balancing, survivorBuckets, killerBuckets };
 }
 
 async function main() {
@@ -1207,7 +1550,7 @@ async function main() {
     for (const filePath of args.files) {
         const absPath = path.resolve(filePath);
         const result = await processFile(absPath, args.columns);
-        const { killer, allowedKiller, allowedSurvivor, balancing, survivorCombos, killerCombos, repetitionLimits } = result;
+        const { killer, allowedKiller, allowedSurvivor, balancing, survivorBuckets, killerBuckets } = result;
 
         const outDir = outDirOverride || path.dirname(absPath);
         fs.mkdirSync(outDir, { recursive: true });
@@ -1215,16 +1558,16 @@ async function main() {
         // Killer slug for filenames
         const killerSlug = killer.Name.replace(/\s+/g, '-');
 
-        // Render killer-side sheet (repetition limits are survivor-only → null)
+        // Render killer-side sheet (killer buckets never contain duplicate limits)
         const killerOut = await renderSheet(
             killer, allowedKiller, 'Allowed Killer Perks',
-            killerSlug, args.columns, outDir, balancing, dateLabel, killerCombos, null
+            killerSlug, args.columns, outDir, balancing, dateLabel, killerBuckets
         );
 
         // Render survivor-side sheet
         const survivorOut = await renderSheet(
             killer, allowedSurvivor, 'Allowed Survivor Perks',
-            killerSlug, args.columns, outDir, balancing, dateLabel, survivorCombos, repetitionLimits
+            killerSlug, args.columns, outDir, balancing, dateLabel, survivorBuckets
         );
 
         console.log(
