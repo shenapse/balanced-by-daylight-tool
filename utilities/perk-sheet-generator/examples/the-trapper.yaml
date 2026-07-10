@@ -44,3 +44,38 @@ survivorPerks:
     - Solidarity
     - { exhaustion: true }  # Group selector: every exhaustion perk (Sprint Burst is covered but adding the group catches future ones)
   deny: []
+
+# Combination bans (image-only — rendered on the sheets, NOT written to --preset).
+# Each perk stays individually allowed; only the listed pairings are restricted.
+# Grouped by scope, in increasing strictness:
+#   survivor — one player may not bring both perks
+#   duo      — neither duo may bring both perks between its two members
+#   team     — if one survivor brings one perk, no other survivor may bring the other
+survivorComboBans:
+  survivor:
+    - [Prove Thyself, Botany Knowledge]   # one player can't stack both repair boosts
+  duo:
+    - [Bond, Kindred]                     # duo partners can't double up on aura reading
+  team:
+    - [Adrenaline, Sprint Burst]          # only one exhaustion-heal across the team
+
+# Killer combos apply to the killer's own 4-perk build (single implicit scope).
+killerComboBans:
+  - ["Scourge Hook: Pain Resonance", Pop Goes the Weasel]
+
+# Repetition limits (image-only — rendered on the survivor sheet, NOT written to
+# --preset). A limit caps how many members of a scoped group may each bring the SAME
+# perk (unlike a combo ban, which restricts a set of DIFFERENT perks together).
+# Survivor side only; scopes are duo and team.
+#   scope: duo | team
+#   max:   positive integer — at most this many members may bring any covered perk
+#   perks: "all" (or omitted) → every allowed perk; or a list → only those perks
+survivorRepetitionLimits:
+  - scope: duo
+    max: 1                 # duo partners may not double up on any perk
+    perks: all
+  - scope: team
+    max: 2                 # each listed perk may be brought by at most 2 survivors
+    perks:
+      - Self-Care
+      - Botany Knowledge

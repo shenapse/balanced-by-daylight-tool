@@ -55,6 +55,30 @@ survivorPerks:
     - Borrowed Time
     - { exhaustion: true }
   deny: []
+
+# Optional. Combination bans — perk PAIRINGS that are restricted even though each
+# perk is individually allowed. IMAGE-ONLY: rendered on the sheets, never written
+# to the --preset JSON (see below).
+survivorComboBans:            # map keyed by scope (all keys optional)
+  survivor:                   # one survivor may not bring both perks
+    - [Prove Thyself, Botany Knowledge]
+  duo:                        # neither duo may bring both between its two members
+    - [Bond, Kindred]
+  team:                       # if one survivor brings one, no other may bring the other
+    - [Adrenaline, Sprint Burst]
+
+killerComboBans:              # killer is one player → a flat list, single "build" scope
+  - ["Scourge Hook: Pain Resonance", Pop Goes the Weasel]
+
+# Optional. Repetition limits — cap how many survivors may each bring the SAME perk
+# within a scope (survivor side only). IMAGE-ONLY, like combination bans.
+survivorRepetitionLimits:     # a list of { scope, max, perks } rules
+  - scope: duo                # duo | team
+    max: 1                    # ≤ this many members may bring any covered perk
+    perks: all                # "all"/omitted → every allowed perk
+  - scope: team
+    max: 2
+    perks: [Self-Care, Botany Knowledge]   # a subset → cap applies per listed perk
 ```
 
 ## Resolution rules (applied independently per side)
@@ -102,6 +126,67 @@ avoids any chance of misparse.
 - An unknown perk name (no match after alias resolution) — the error message names the offending token and the input file.
 - An unknown killer name.
 
+## Combination bans
+
+`survivorComboBans` / `killerComboBans` declare perk **pairings** that are
+restricted even though each perk stays individually allowed (e.g. Bond and
+Aftercare are both fine, but one survivor may not carry both).
+
+- **`survivorComboBans`** is a map keyed by scope; all keys are optional:
+  | Scope | Meaning |
+  |-------|---------|
+  | `survivor` | One survivor may not bring both perks. |
+  | `duo` | The team is two duos A=(A1,A2), B=(B1,B2); neither duo may split the pair between its two members. A1+A2 is illegal; A1+B1 is fine. |
+  | `team` | If any survivor brings one perk, no other survivor may bring the other. |
+- **`killerComboBans`** is a flat list of combos (the killer is one player, so the
+  only meaningful scope is the killer's own 4-perk build).
+- Each combo is a **list of 2+ perk names**, resolved with the same alias-aware
+  lookup as `allow`/`deny` (quote colon names). Group selectors
+  (`{exhaustion:true}` / `{tag:…}`) are **not** allowed inside a combo.
+- A combo naming a perk that is not in that side's allowed set emits a non-fatal
+  **warning** (the combo is moot because the perk is already individually banned).
+
+**Hard errors**: an unknown scope key under `survivorComboBans`, a combo with
+fewer than 2 perks, or an unknown perk name.
+
+> **Image-only.** Combination bans are rendered onto the sheets but are **not**
+> written into the `--preset` JSON. The live checker only enforces
+> *per-single-survivor* combos (`SurvivorComboPerkBans`) and has no duo/team
+> concept, so those scopes would have no enforcement path; the sheet is the
+> deliverable.
+
+## Repetition limits
+
+`survivorRepetitionLimits` caps how many members of a scoped group may each bring the
+**same** perk. This is the complement of a combination ban: a combo ban restricts a set
+of *different* perks appearing together, whereas a repetition limit restricts *copies of
+one perk* across players. It is a scoped, subset-restricted generalization of the
+preset's top-level `MaxPerkRepetition` (team-wide max copies of any single perk).
+
+**Survivor side only** — the killer is one player, so "how many survivors bring it" is
+meaningless there.
+
+`survivorRepetitionLimits` is a **list of `{ scope, max, perks }` rule objects**:
+
+| Field | Meaning |
+|-------|---------|
+| `scope` | `duo` or `team`. (A per-single-survivor scope is meaningless — one survivor cannot bring the same perk twice.) |
+| `max` | Positive integer. Within each group of that scope, at most `max` members may bring any single covered perk. |
+| `perks` | `all` / omitted → every allowed survivor perk. A **list of perk names** → the cap applies per-perk to each listed perk. Resolved with the same alias-aware lookup as `allow`/`deny` (quote colon names); group selectors (`{exhaustion}`/`{tag}`) are **not** allowed. |
+
+Examples: `{ scope: duo, max: 1, perks: all }` — duo partners may not double up on any
+perk. `{ scope: team, max: 2, perks: [Self-Care, Botany Knowledge] }` — each of those two
+perks may be brought by at most two of the four survivors.
+
+**Hard errors**: `survivorRepetitionLimits` that is not a list, an unknown `scope`, a
+non-integer or `< 1` `max`, a group selector inside `perks`, or an unknown perk name.
+**Non-fatal warnings**: a listed perk that is not in the allowed set (moot), or a `duo`
+rule with `max ≥ 2` (vacuous — a duo has only two members).
+
+> **Image-only.** Like combination bans, repetition limits are rendered onto the survivor
+> sheet but are **not** written into the `--preset` JSON. The checker's only repetition
+> surface is the top-level `MaxPerkRepetition`, which has no per-subset or duo/team concept.
+
 ## Output
 
 Two PNG files per killer into `<outDir>/`:
@@ -116,6 +201,16 @@ timestamp. On the **survivor-side** sheet the title reads **"Going against: \<ki
 (survivors bring these perks against that killer); the killer-side sheet shows the plain
 killer name.
 When `count == 0` the header still renders with a "None allowed" note.
+
+If the survivor sheet declares repetition limits, a **"Repetition Limits"** section is
+appended directly below the allowed-perk grid: each rule shows a scope chip, a
+plain-English rule line, and either an **"ALL PERKS"** pill (for `perks: all`) or the
+subset's perk icons. A `(N repetition limits)` count is added under the header.
+
+If the YAML declares combination bans, a **"Combination Bans"** section is appended
+below the repetition-limit section: grouped by scope (each with a coloured chip and a
+plain-English rule line), every combo shown as its perk icons joined by a "+" with
+the perk name beneath. A `(N combination bans)` count is added under the header.
 
 ## Preset compilation (`--preset`)
 
