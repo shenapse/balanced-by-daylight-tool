@@ -55,6 +55,20 @@ survivorPerks:
     - Borrowed Time
     - { exhaustion: true }
   deny: []
+
+# Optional. Combination bans — perk PAIRINGS that are restricted even though each
+# perk is individually allowed. IMAGE-ONLY: rendered on the sheets, never written
+# to the --preset JSON (see below).
+survivorComboBans:            # map keyed by scope (all keys optional)
+  survivor:                   # one survivor may not bring both perks
+    - [Prove Thyself, Botany Knowledge]
+  duo:                        # neither duo may bring both between its two members
+    - [Bond, Kindred]
+  team:                       # if one survivor brings one, no other may bring the other
+    - [Adrenaline, Sprint Burst]
+
+killerComboBans:              # killer is one player → a flat list, single "build" scope
+  - ["Scourge Hook: Pain Resonance", Pop Goes the Weasel]
 ```
 
 ## Resolution rules (applied independently per side)
@@ -102,6 +116,35 @@ avoids any chance of misparse.
 - An unknown perk name (no match after alias resolution) — the error message names the offending token and the input file.
 - An unknown killer name.
 
+## Combination bans
+
+`survivorComboBans` / `killerComboBans` declare perk **pairings** that are
+restricted even though each perk stays individually allowed (e.g. Bond and
+Aftercare are both fine, but one survivor may not carry both).
+
+- **`survivorComboBans`** is a map keyed by scope; all keys are optional:
+  | Scope | Meaning |
+  |-------|---------|
+  | `survivor` | One survivor may not bring both perks. |
+  | `duo` | The team is two duos A=(A1,A2), B=(B1,B2); neither duo may split the pair between its two members. A1+A2 is illegal; A1+B1 is fine. |
+  | `team` | If any survivor brings one perk, no other survivor may bring the other. |
+- **`killerComboBans`** is a flat list of combos (the killer is one player, so the
+  only meaningful scope is the killer's own 4-perk build).
+- Each combo is a **list of 2+ perk names**, resolved with the same alias-aware
+  lookup as `allow`/`deny` (quote colon names). Group selectors
+  (`{exhaustion:true}` / `{tag:…}`) are **not** allowed inside a combo.
+- A combo naming a perk that is not in that side's allowed set emits a non-fatal
+  **warning** (the combo is moot because the perk is already individually banned).
+
+**Hard errors**: an unknown scope key under `survivorComboBans`, a combo with
+fewer than 2 perks, or an unknown perk name.
+
+> **Image-only.** Combination bans are rendered onto the sheets but are **not**
+> written into the `--preset` JSON. The live checker only enforces
+> *per-single-survivor* combos (`SurvivorComboPerkBans`) and has no duo/team
+> concept, so those scopes would have no enforcement path; the sheet is the
+> deliverable.
+
 ## Output
 
 Two PNG files per killer into `<outDir>/`:
@@ -116,6 +159,11 @@ timestamp. On the **survivor-side** sheet the title reads **"Going against: \<ki
 (survivors bring these perks against that killer); the killer-side sheet shows the plain
 killer name.
 When `count == 0` the header still renders with a "None allowed" note.
+
+If the YAML declares combination bans, a **"Combination Bans"** section is appended
+below the allowed-perk grid: grouped by scope (each with a coloured chip and a
+plain-English rule line), every combo shown as its perk icons joined by a "+" with
+the perk name beneath. A `(N combination bans)` count is added under the header.
 
 ## Preset compilation (`--preset`)
 
