@@ -795,7 +795,7 @@ function drawRepetitionSection(ctx, layout, startY, iconMap, width) {
     ctx.textBaseline = 'top';
     ctx.fillStyle = TEXT_COLOR;
     ctx.font = '700 22pt sans-serif';
-    ctx.fillText('Repetition Limits', MARGIN, y);
+    ctx.fillText('Duplicate Limit', MARGIN, y);
     y += 40;
     ctx.font = '400 13pt sans-serif';
     ctx.fillStyle = '#999999';
@@ -898,7 +898,7 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
     const repCount = repetitionLimits ? repetitionLimits.length : 0;
     measure.font = '400 14pt sans-serif';
     const repCountW = repCount
-        ? measure.measureText(`(${repCount} repetition limit${repCount === 1 ? '' : 's'})`).width
+        ? measure.measureText(`(${repCount} duplicate limit${repCount === 1 ? '' : 's'})`).width
         : 0;
     measure.font = '400 16pt sans-serif';
     const leftMaxW = Math.max(titleW, subW, countW, comboCountW, repCountW);
@@ -952,7 +952,7 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
         ctx.font = '400 14pt sans-serif';
         ctx.fillStyle = '#888888';
         ctx.fillText(
-            `(${repCount} repetition limit${repCount === 1 ? '' : 's'})`,
+            `(${repCount} duplicate limit${repCount === 1 ? '' : 's'})`,
             textX, MARGIN + 116
         );
     }
