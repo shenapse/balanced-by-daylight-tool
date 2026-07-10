@@ -1,6 +1,6 @@
 {
   "name": "dbd-item-sheet-generator",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "private": true,
   "description": "CLI for generating Dead by Daylight item sheet PNGs from YAML allow-lists.",
   "bin": {
