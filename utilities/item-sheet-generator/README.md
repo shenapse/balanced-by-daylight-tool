@@ -117,17 +117,75 @@ Each entry in `allow:` / `deny:` is either:
 variant/add-on name, an unknown rarity name, or an unrecognised selector shape (the message names
 the offending token and the file).
 
+## Item limits (image-only)
+
+The allow-list above is a **candidate pool**: each survivor brings exactly **one** item, chosen
+from it. On top of that pool you can express how many of a given item the team may field. These
+limits are **rendered on the sheet only** — they are *not* written to the `--preset` JSON (only the
+allow-lists become whitelists). Two optional top-level keys, both lists:
+
+```yaml
+# Duplicate limits: "how many survivors may bring the SAME item."
+itemDuplicateLimits:
+  - scope: team          # team | duo   (see note on scopes below)
+    max: 1               # at most this many members may bring any one item
+    items: all           # "all" (or omitted) = every allowed item; or a list narrows it
+  - scope: duo
+    max: 1
+    items:
+      - First Aid Kit
+      - Ranger Med-Kit
+
+# Pick limits: "the group may bring at most N items drawn from this set."
+itemPickLimits:
+  - scope: team
+    max: 2               # must be less than the number of resolved items
+    items:               # a list of 2+ selectors (see below)
+      - { type: Med-Kit }
+      - { type: Toolbox }
+```
+
+### Scopes
+
+Item limits support only **`team`** (the whole 4-survivor squad) and **`duo`** (two members).
+There is no `survivor` scope: each survivor brings a single item, so a per-survivor item limit
+would be vacuous. Scope is shown on the sheet as a coloured chip (`DUO` orange, `WHOLE TEAM` red).
+
+### Limit selectors
+
+Each entry under a limit's `items:` is either:
+- A **plain name string** — an item **variant** name (normalised like everywhere else).
+- A **`{ type: <TypeName> }` object** — expands to **all allowed variants of that type**. Use this
+  when you mean the whole item type (it also disambiguates a variant named like its type, e.g. the
+  `Flashlight` variant vs. the `Flashlight` type).
+
+A selector that names a variant **not** in this sheet's allowed pool is warned about and dropped
+from that limit; an unknown name/type is a hard error.
+
+### How limits are validated / reduced
+
+- `scope` must be `team` or `duo`; `max` must be a positive integer.
+- A **duplicate** limit renders per rule as its scope chip + a sentence like *"No two survivors may
+  bring the same item."*, followed by the listed item icons (or an `ALL ITEMS` pill for `items: all`).
+- A **pick** limit requires an explicit list of 2+ items and renders as *"The team may bring at most
+  N of these items."* + the item icons. If `max` is at least the resolved item count the limit is
+  **vacuous** and is warned about and dropped.
+
 ## Output
 
 One PNG per input file into `<outDir>/`:
 - `<KillerSlug>-items.png`
 
 Layout: a dark header (killer portrait, the title **"Going against: \<killer\>"** — survivors bring
-these items against that killer — "Allowed Items & Add-ons", item count, and a provenance block with
-the `balancing` label if set plus the auto-stamped generation timestamp), then one row
-per allowed variant — the variant icon, its name, and its type's allowed add-on icons in a strip.
-Rows with no allowed add-ons show "(no add-ons allowed)". Variants are grouped in item-type order,
-then sorted by name. Missing icons fall back to a grey placeholder box.
+these items against that killer — "Allowed Items & Add-ons", a legend line clarifying that **each
+survivor brings one item chosen from the pool**, the item count, one count-line per limit family
+present (e.g. *(1 duplicate limit)*), and a provenance block with the `balancing` label if set plus
+the auto-stamped generation timestamp). Below the header the allowed items are grouped under an
+**item-type section header** (Flashlight, Med-Kit, …) in item-type order, each showing one row per
+allowed variant — the variant icon and its type's allowed add-on icons in a strip. Rows with no
+allowed add-ons show "(no add-ons allowed)". Finally, any **Duplicate Limit** and **Pick Limits**
+sections render below the grid, each with a scope chip, a plain-English rule sentence, and the
+affected item icons. Missing icons fall back to a grey placeholder box.
 
 ## Preset compilation (`--preset`)
 
