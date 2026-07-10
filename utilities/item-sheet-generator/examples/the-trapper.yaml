@@ -38,3 +38,30 @@ items:
     default: allow
     addons:
       default: deny
+
+# ---------------------------------------------------------------------------
+# Item limits (image-only — rendered on the sheet, NOT written to the --preset).
+# Each survivor brings exactly ONE item chosen from the allowed pool above, so
+# limits are about the TEAM or a DUO — a per-survivor scope would be meaningless.
+# Selectors are an item-variant name, or { type: <TypeName> } for a whole type.
+# ---------------------------------------------------------------------------
+
+# Duplicate limits: "how many survivors may bring the SAME item."
+#   scope: duo | team
+#   max:   positive integer — at most this many members may bring any one item
+#   items: "all" (or omitted) → every allowed item; or a list → only those items
+itemDuplicateLimits:
+  - scope: team
+    max: 1                 # no two survivors may bring the same item
+    items: all
+
+# Pick limits: "the group may bring at most N items drawn from this set."
+#   scope: duo | team
+#   max:   positive integer (must be less than the number of listed items)
+#   items: a list of 2+ selectors (variant names and/or { type: ... })
+itemPickLimits:
+  - scope: team
+    max: 2                 # at most two healing/repair items across the team
+    items:
+      - { type: Med-Kit }  # any Med-Kit variant counts toward the 2
+      - { type: Toolbox }
