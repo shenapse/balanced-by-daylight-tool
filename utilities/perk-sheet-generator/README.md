@@ -79,6 +79,16 @@ survivorRepetitionLimits:     # a list of { scope, max, perks } rules
   - scope: team
     max: 2
     perks: [Self-Care, Botany Knowledge]   # a subset → cap applies per listed perk
+
+# Optional. Pick limits — "pick at most N perks from this list". IMAGE-ONLY, both sides.
+survivorPickLimits:           # a list of { scope, max, perks } rules
+  - scope: duo                # survivor | duo | team
+    max: 1                    # the group may bring ≤ this many perks from the list
+    perks: [Sprint Burst, Lithe, Balanced Landing]   # 2+ perks to choose from (required)
+
+killerPickLimits:             # killer is one player → { max, perks } (no scope)
+  - max: 2
+    perks: [Pop Goes the Weasel, Corrupt Intervention, Overcharge, Eruption]
 ```
 
 ## Resolution rules (applied independently per side)
@@ -187,6 +197,62 @@ rule with `max ≥ 2` (vacuous — a duo has only two members).
 > sheet but are **not** written into the `--preset` JSON. The checker's only repetition
 > surface is the top-level `MaxPerkRepetition`, which has no per-subset or duo/team concept.
 
+## Pick limits
+
+`survivorPickLimits` / `killerPickLimits` express **"pick at most N perks from this
+list"** — within a scoped group, the members may bring at most `max` perks drawn from
+the listed set in total.
+
+- **`survivorPickLimits`** is a **list of `{ scope, max, perks }` rules**; `scope` is
+  `survivor`, `duo`, or `team`.
+- **`killerPickLimits`** is a **list of `{ max, perks }` rules** (the killer is one
+  player, so the scope is implicitly the killer's own 4-perk build).
+- `perks` is **required** and must be an explicit list of **2+ perk names** (you pick
+  *from* a list), resolved with the same alias-aware lookup as `allow`/`deny` (quote
+  colon names). Group selectors (`{exhaustion}`/`{tag}`) are **not** allowed.
+- `max` is a positive integer.
+
+Example: `{ scope: duo, max: 1, perks: [Sprint Burst, Lithe, Balanced Landing] }` — a duo
+may bring at most one of those three exhaustion perks between its two members.
+
+> **Distinct-pick nuance.** A pick limit counts *slots*, so `max: 2` over a duo is
+> satisfied by two members both bringing the same listed perk. To additionally forbid
+> that (require the picks to be *different* perks), pair the pick limit with a duplicate
+> limit on the same subset (`survivorRepetitionLimits`, `max: 1`).
+
+**Hard errors**: a list that is not a list, an unknown/omitted `scope` (survivor side), a
+scope on a `killerPickLimits` entry, a non-integer or `< 1` `max`, `perks` missing or with
+fewer than 2 names, a group selector inside `perks`, or an unknown perk name.
+**Non-fatal warnings**: a listed perk not in the allowed set (moot).
+
+> **Image-only.** Like the other limits, pick limits are rendered onto the sheets but are
+> **not** written into the `--preset` JSON.
+
+## Generalized perk-limit model (internal)
+
+Combination bans, duplicate limits, and pick limits are all authoring **sugar** for one
+internal model — a cap on how a scoped group may use a set of perks, `{ scope, count, max,
+perks }`:
+
+- `count: perPerk` → each perk in the set may be brought by at most `max` members of the
+  group (the **duplicate** family).
+- `count: total` → the group may bring at most `max` perks drawn from the set in total
+  (the **pick / combo** family).
+
+The model is never rendered directly. Each limit is **reduced** to exactly one concrete
+render target:
+
+| Render target | When |
+|---------------|------|
+| **Duplicate limit** | `count: perPerk` |
+| **Combination ban** | `count: total`, explicit list, `max = (list length − 1)` — i.e. "not all of them together" |
+| **Pick limit** | `count: total`, explicit list, `1 ≤ max < (list length − 1)` — i.e. "pick at most N" |
+| *dropped (warned)* | `count: total` with `max ≥ list length` (vacuous) |
+
+So a pick limit authored with `max = length − 1` renders under **Combination Bans**, and a
+two-perk combo (`max 1`, 2 perks) is exactly the classic pairing ban. The sugar keys are
+kept for convenient authoring.
+
 ## Output
 
 Two PNG files per killer into `<outDir>/`:
@@ -202,15 +268,22 @@ timestamp. On the **survivor-side** sheet the title reads **"Going against: \<ki
 killer name.
 When `count == 0` the header still renders with a "None allowed" note.
 
-If the survivor sheet declares repetition limits, a **"Repetition Limits"** section is
-appended directly below the allowed-perk grid: each rule shows a scope chip, a
-plain-English rule line, and either an **"ALL PERKS"** pill (for `perks: all`) or the
-subset's perk icons. A `(N repetition limits)` count is added under the header.
+Below the allowed-perk grid, up to three restriction sections are appended in a fixed
+order — **Duplicate Limit → Pick Limits → Combination Bans** — each with a `(N …)` count
+line stacked under the header:
 
-If the YAML declares combination bans, a **"Combination Bans"** section is appended
-below the repetition-limit section: grouped by scope (each with a coloured chip and a
-plain-English rule line), every combo shown as its perk icons joined by a "+" with
-the perk name beneath. A `(N combination bans)` count is added under the header.
+- **Duplicate Limit** (survivor side only): each rule shows a scope chip, a plain-English
+  rule line, and either an **"ALL PERKS"** pill (for `perks: all`) or the subset's perk
+  icons.
+- **Pick Limits**: each rule shows a scope chip, a plain-English rule line, and the listed
+  perks' icons.
+- **Combination Bans**: grouped by scope (each with a coloured chip and a plain-English
+  rule line), every combo shown as its perk icons joined by a "+" with the perk name
+  beneath.
+
+(The section a given limit lands in is decided by the reduction described in
+*Generalized perk-limit model* above — e.g. a pick limit whose `max` equals its list
+length minus one appears under **Combination Bans**.)
 
 ## Preset compilation (`--preset`)
 
