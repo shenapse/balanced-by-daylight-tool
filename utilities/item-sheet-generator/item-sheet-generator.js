@@ -788,7 +788,18 @@ async function renderSheet(killer, types, killerSlug, outDir, balancing, dateLab
 
     const leftNeed = textX + leftMaxW + MARGIN;
     const metaNeed = textX + metaMaxW + MARGIN; // textX floor also clears the portrait
-    const width = Math.ceil(Math.max(bodyWidth, leftNeed, metaNeed, repW, pickW));
+
+    // The left restriction-count lines and the right provenance lines share the bottom rows
+    // of the header. leftNeed/metaNeed each reserve room for one side alone, so a slim sheet
+    // (e.g. no add-ons allowed) can place a count line and a provenance line close enough to
+    // overlap. Reserve room for both on one row plus a gap so they never collide.
+    const countMaxW = Math.max(repCountW, pickCountW);
+    const COUNT_META_GAP = 24;
+    const sharedNeed = (countMaxW && metaMaxW)
+        ? textX + countMaxW + COUNT_META_GAP + metaMaxW + MARGIN
+        : 0;
+
+    const width = Math.ceil(Math.max(bodyWidth, leftNeed, metaNeed, sharedNeed, repW, pickW));
 
     const height = HEADER_H + MARGIN + bodyLayout.bodyH + MARGIN + repH + pickH;
 
