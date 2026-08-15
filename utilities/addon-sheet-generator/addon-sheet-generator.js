@@ -16,9 +16,11 @@
  * Usage:
  *   node utilities/addon-sheet-generator/addon-sheet-generator.js <file.yaml...>
  *        [--asset-root <dir>] [--out <dir>] [--columns <n>]
- *        [--preset <out.json>] [--name "<name>"]
+ *        [--preset <out.json>] [--name "<name>"] [--icons-only]
  *
  * Sheets are written next to each input file by default; --out overrides this.
+ * --icons-only additionally renders a text-free, transparent-background icon-grid
+ * variant of each sheet (see renderIconSheet).
  */
 
 const fs   = require('fs');
@@ -116,6 +118,7 @@ function parseArgs(argv) {
         columns: DEFAULT_COLUMNS,
         presetPath: null,
         presetName: 'Generated Add-on Allow-List',
+        iconsOnly: false,
     };
     let i = 0;
     while (i < argv.length) {
@@ -132,6 +135,9 @@ function parseArgs(argv) {
             args.presetName = argv[++i];
         } else if (a === '--asset-root' && argv[i + 1]) {
             i++;
+        } else if (a === '--icons-only') {
+            // Boolean flag: unlike the others above, this does not consume a value.
+            args.iconsOnly = true;
         } else if (!a.startsWith('--')) {
             args.files.push(a);
         } else {
@@ -277,12 +283,16 @@ function portraitPng(killer) {
 }
 
 // ---------------------------------------------------------------------------
-// Image rendering
+// Rarity grouping
 // ---------------------------------------------------------------------------
-async function renderSheet(killer, allowedAddons, killerSlug, columns, outDir, balancing, dateLabel) {
-    const count = allowedAddons.length;
-
-    // Group allowed add-ons by rarity, sorted within each rarity by name.
+/**
+ * Group allowed add-ons by rarity, sorted within each rarity by name. Skips empty
+ * rarities and preserves rarity index order (Common -> Ultra Rare). Shared by both
+ * renderSheet and renderIconSheet.
+ * @param {Array} allowedAddons
+ * @returns {Array} sections: [{ rarity, addons: [...] }, ...]
+ */
+function groupAddonsByRarity(allowedAddons) {
     const sections = []; // { rarity, addons: [...] }
     for (let r = 0; r < RARITY_NAMES.length; r++) {
         const group = allowedAddons
@@ -290,6 +300,17 @@ async function renderSheet(killer, allowedAddons, killerSlug, columns, outDir, b
             .sort((a, b) => a.Name.localeCompare(b.Name));
         if (group.length > 0) sections.push({ rarity: r, addons: group });
     }
+    return sections;
+}
+
+// ---------------------------------------------------------------------------
+// Image rendering
+// ---------------------------------------------------------------------------
+async function renderSheet(killer, allowedAddons, killerSlug, columns, outDir, balancing, dateLabel) {
+    const count = allowedAddons.length;
+
+    // Group allowed add-ons by rarity, sorted within each rarity by name.
+    const sections = groupAddonsByRarity(allowedAddons);
 
     // Load the portrait up front so its width feeds into the layout below
     // (loadImage needs no canvas, so this can run before the canvas is sized).
@@ -444,6 +465,71 @@ async function renderSheet(killer, allowedAddons, killerSlug, columns, outDir, b
     return outFile;
 }
 
+/**
+ * Render the --icons-only variant: just the allowed-add-on icon grid, no header, no
+ * text at all, tightly cropped to the grid's own bounding box on a fully transparent
+ * background. Meant to be composited over other art (e.g. a stream overlay), so
+ * unlike renderSheet it deliberately skips the BG_COLOR fillRect — a fresh canvas
+ * context starts fully transparent, and PNG output preserves that alpha. Rarity
+ * sections stay stacked (the grouping is meaningful) but lose their text labels and
+ * the LABEL_W gutter. Returns null (writing nothing) when there are no allowed
+ * add-ons, since neither an empty canvas nor a text note make sense here.
+ */
+async function renderIconSheet(allowedAddons, killerSlug, columns, outDir) {
+    if (allowedAddons.length === 0) return null;
+
+    const sections = groupAddonsByRarity(allowedAddons);
+
+    // Tight width: the largest section's column count, capped at `columns`.
+    const cols = Math.min(Math.max(...sections.map(s => s.addons.length)), columns);
+    const width = cols * ICON + (cols - 1) * GAP;
+
+    // Per-section geometry + running y offset (sections stacked, separated by SECTION_GAP).
+    let bodyH = 0;
+    for (let s = 0; s < sections.length; s++) {
+        const rows = Math.ceil(sections[s].addons.length / columns);
+        sections[s].rows = rows;
+        sections[s].height = rows * ICON + (rows - 1) * GAP;
+        sections[s].y = bodyH;
+        bodyH += sections[s].height;
+        if (s < sections.length - 1) bodyH += SECTION_GAP;
+    }
+    const height = bodyH;
+
+    const canvas = createCanvas(width, height);
+    const ctx    = canvas.getContext('2d');
+    // No background fill here — see doc comment above.
+
+    // Preload all add-on art (flattened, in render order)
+    const flat = [];
+    for (const sec of sections) for (const a of sec.addons) flat.push(a);
+    const artImages = await Promise.allSettled(flat.map(a => loadImage(addonIconPng(a))));
+    const artByGlobalId = new Map();
+    flat.forEach((a, i) => artByGlobalId.set(a.globalID, artImages[i]));
+
+    for (const sec of sections) {
+        for (let i = 0; i < sec.addons.length; i++) {
+            const col = i % columns;
+            const row = Math.floor(i / columns);
+            const x = col * (ICON + GAP);
+            const y = sec.y + row * (ICON + GAP);
+
+            const art = artByGlobalId.get(sec.addons[i].globalID);
+            if (art && art.status === 'fulfilled') {
+                ctx.drawImage(art.value, x, y, ICON, ICON);
+            } else {
+                // No opaque placeholder here — it would punch a hole in the transparency.
+                // Skip the cell and just warn.
+                console.warn(`WARNING: missing icon for add-on "${sec.addons[i].Name}"; skipping cell.`);
+            }
+        }
+    }
+
+    const outFile = path.join(outDir, `${killerSlug}-killer-addons-icons.png`);
+    fs.writeFileSync(outFile, canvas.toBuffer('image/png'));
+    return outFile;
+}
+
 // ---------------------------------------------------------------------------
 // Preset compilation
 // ---------------------------------------------------------------------------
@@ -583,7 +669,7 @@ async function main() {
         console.log(
             'Usage: node addon-sheet-generator.js <file.yaml...>\n' +
             '       [--asset-root <dir>] [--out <dir>] [--columns <n>]\n' +
-            '       [--preset <out.json>] [--name "<name>"]'
+            '       [--preset <out.json>] [--name "<name>"] [--icons-only]'
         );
         process.exit(0);
     }
@@ -611,11 +697,20 @@ async function main() {
             killer, allowedAddons, killerSlug, args.columns, outDir, balancing, dateLabel
         );
 
-        console.log(
+        let summary =
             `[${killer.Name}]\n` +
             `  Allowed add-ons: ${allowedAddons.length} / ${result.universe.length}\n` +
-            `  Sheet → ${outFile}`
-        );
+            `  Sheet → ${outFile}`;
+
+        // Optional text-free, transparent-background icon-grid variant.
+        if (args.iconsOnly) {
+            const iconsOut = await renderIconSheet(
+                allowedAddons, killerSlug, args.columns, outDir
+            );
+            summary += `\n  Add-on icons  → ${iconsOut || '(skipped — no allowed add-ons)'}`;
+        }
+
+        console.log(summary);
 
         results.push(result);
     }
