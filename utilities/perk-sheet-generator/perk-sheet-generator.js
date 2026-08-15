@@ -11,9 +11,11 @@
  * Usage:
  *   node utilities/perk-sheet-generator/perk-sheet-generator.js <file.yaml...>
  *        [--asset-root <dir>] [--out <dir>] [--columns <n>]
- *        [--preset <out.json>] [--name "<name>"]
+ *        [--preset <out.json>] [--name "<name>"] [--icons-only]
  *
  * Sheets are written next to each input file by default; --out overrides this.
+ * --icons-only additionally renders a text-free, transparent-background icon-grid
+ * variant of each sheet (see renderIconSheet).
  */
 
 const fs   = require('fs');
@@ -162,6 +164,7 @@ function parseArgs(argv) {
         columns: DEFAULT_COLUMNS,
         presetPath: null,
         presetName: 'Generated Allow-List',
+        iconsOnly: false,
     };
     let i = 0;
     while (i < argv.length) {
@@ -178,6 +181,9 @@ function parseArgs(argv) {
             args.presetName = argv[++i];
         } else if (a === '--asset-root' && argv[i + 1]) {
             i++;
+        } else if (a === '--icons-only') {
+            // Boolean flag: unlike the others above, this does not consume a value.
+            args.iconsOnly = true;
         } else if (!a.startsWith('--')) {
             args.files.push(a);
         } else {
@@ -1384,6 +1390,54 @@ async function renderSheet(killer, allowedPerks, sideLabel, killerSlug, columns,
     return outFile;
 }
 
+/**
+ * Render the --icons-only variant: just the allowed-perk grid, no header, no
+ * restriction sections, no text at all, tightly cropped to the grid's own bounding
+ * box on a fully transparent background. Meant to be composited over other art
+ * (e.g. a stream overlay), so unlike renderSheet it deliberately skips the
+ * BG_COLOR fillRect — a fresh canvas context starts fully transparent, and PNG
+ * output preserves that alpha. Returns null (writing nothing) when there are no
+ * allowed perks, since neither an empty canvas nor a text note make sense here.
+ */
+async function renderIconSheet(allowedPerks, sideLabel, killerSlug, columns, outDir) {
+    const count = allowedPerks.length;
+    if (count === 0) return null;
+
+    const cols = Math.min(count, columns);
+    const rows = Math.ceil(count / columns);
+    const width  = cols * ICON + (cols - 1) * GAP;
+    const height = rows * ICON + (rows - 1) * GAP;
+
+    const canvas = createCanvas(width, height);
+    const ctx    = canvas.getContext('2d');
+    // No background fill here — see doc comment above.
+
+    // Preload all icons
+    const iconPaths = allowedPerks.map(p => perkIconPng(p));
+    const iconImages = await Promise.allSettled(iconPaths.map(p => loadImage(p)));
+
+    for (let i = 0; i < allowedPerks.length; i++) {
+        const col = i % columns;
+        const row = Math.floor(i / columns);
+        const x   = col * (ICON + GAP);
+        const y   = row * (ICON + GAP);
+
+        const result = iconImages[i];
+        if (result.status === 'fulfilled') {
+            ctx.drawImage(result.value, x, y, ICON, ICON);
+        } else {
+            // No opaque placeholder here — it would punch a hole in the transparency.
+            // Skip the cell and just warn.
+            console.warn(`WARNING: missing icon for perk "${allowedPerks[i].name}"; skipping cell.`);
+        }
+    }
+
+    const sidePart = sideLabel === 'Allowed Killer Perks' ? 'killer' : 'survivor';
+    const outFile  = path.join(outDir, `${killerSlug}-${sidePart}-perks-icons.png`);
+    fs.writeFileSync(outFile, canvas.toBuffer('image/png'));
+    return outFile;
+}
+
 // ---------------------------------------------------------------------------
 // Preset compilation
 // ---------------------------------------------------------------------------
@@ -1532,7 +1586,7 @@ async function main() {
         console.log(
             'Usage: node perk-sheet-generator.js <file.yaml...>\n' +
             '       [--asset-root <dir>] [--out <dir>] [--columns <n>]\n' +
-            '       [--preset <out.json>] [--name "<name>"]'
+            '       [--preset <out.json>] [--name "<name>"] [--icons-only]'
         );
         process.exit(0);
     }
@@ -1570,13 +1624,27 @@ async function main() {
             killerSlug, args.columns, outDir, balancing, dateLabel, survivorBuckets
         );
 
-        console.log(
+        let summary =
             `[${killer.Name}]\n` +
             `  Allowed killer perks  : ${allowedKiller.length}\n` +
             `  Allowed survivor perks: ${allowedSurvivor.length}\n` +
             `  Killer sheet  → ${killerOut}\n` +
-            `  Survivor sheet→ ${survivorOut}`
-        );
+            `  Survivor sheet→ ${survivorOut}`;
+
+        // Optional text-free, transparent-background icon-grid variants.
+        if (args.iconsOnly) {
+            const killerIconsOut = await renderIconSheet(
+                allowedKiller, 'Allowed Killer Perks', killerSlug, args.columns, outDir
+            );
+            const survivorIconsOut = await renderIconSheet(
+                allowedSurvivor, 'Allowed Survivor Perks', killerSlug, args.columns, outDir
+            );
+            summary +=
+                `\n  Killer icons  → ${killerIconsOut || '(skipped — no allowed perks)'}` +
+                `\n  Survivor icons→ ${survivorIconsOut || '(skipped — no allowed perks)'}`;
+        }
+
+        console.log(summary);
 
         results.push(result);
     }
