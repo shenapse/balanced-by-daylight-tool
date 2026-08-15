@@ -2,7 +2,8 @@
 
 A standalone CLI tool that reads a YAML file describing one killer's *allowed* perks
 and produces two PNG "allowed perks" sheets (killer-side and survivor-side), plus an
-optional BbD balancing-preset JSON when aggregating multiple killers.
+optional BbD balancing-preset JSON when aggregating multiple killers, plus optional
+text-free icon-grid PNGs with `--icons-only`.
 
 ## Quick start
 
@@ -20,10 +21,13 @@ node utilities/perk-sheet-generator/perk-sheet-generator.js \
 
 ```
 node utilities/perk-sheet-generator/perk-sheet-generator.js <file.yaml...>
+     [--asset-root <dir>] Repo root used to resolve canvas-image-library/ assets
+                          (default: DBD_BALANCING_TOOL_ROOT env var, else auto-detected)
      [--out <dir>]        Output directory (default: next to each input file)
      [--columns <n>]      Grid columns (default: 8)
      [--preset <path>]    Also compile a BbD preset JSON from all input files
      [--name "<name>"]    Preset Name field (default: "Generated Allow-List")
+     [--icons-only]       Also write text-free, transparent icon-grid PNGs (see Output)
 ```
 
 ## YAML schema
@@ -255,7 +259,7 @@ kept for convenient authoring.
 
 ## Output
 
-Two PNG files per killer into `<outDir>/`:
+Two PNG files per killer into `<outDir>/` (plus two more with `--icons-only`, see below):
 - `<KillerSlug>-killer-perks.png`
 - `<KillerSlug>-survivor-perks.png`
 
@@ -284,6 +288,28 @@ line stacked under the header:
 (The section a given limit lands in is decided by the reduction described in
 *Generalized perk-limit model* above — e.g. a pick limit whose `max` equals its list
 length minus one appears under **Combination Bans**.)
+
+### Icon-only sheets (`--icons-only`)
+
+When `--icons-only` is passed, two extra PNGs per killer are written alongside the
+regular sheets:
+- `<KillerSlug>-killer-perks-icons.png`
+- `<KillerSlug>-survivor-perks-icons.png`
+
+These are a stripped-down variant meant for reuse/compositing elsewhere (embedded in a
+post, a rules doc, a slide, or layered over another background) rather than as a
+finished deliverable:
+
+- Just the allowed-perk icon grid — same perks, same alphabetical order, same `--columns`
+  count and icon size/gap geometry as the regular sheet, last row left-aligned.
+- No header (no portrait, title, side label, `(N perks)` line, restriction counts, or
+  provenance/`Generated:`/`Balancing:` block) and no restriction sections (Duplicate
+  Limit, Pick Limits, Combination Bans) — no text of any kind.
+- Fully transparent background, unlike the regular sheets' opaque `#100f16`.
+- Tight crop: no outer margin, and the width matches the actual columns used (a list
+  shorter than `--columns` is not padded to full width).
+- If a side has zero allowed perks, its icon sheet is skipped entirely (no file written,
+  just a log note) — there's no text-free equivalent of "None allowed".
 
 ## Preset compilation (`--preset`)
 

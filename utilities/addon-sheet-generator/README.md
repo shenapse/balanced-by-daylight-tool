@@ -3,7 +3,8 @@
 A standalone CLI tool that reads a YAML file describing one killer's *allowed*
 power add-ons and produces a PNG "allowed add-ons" sheet — grouped by rarity
 (Common → Uncommon → Rare → Very Rare → Ultra Rare) with rarity-bordered icons —
-plus an optional BbD balancing-preset JSON.
+plus an optional BbD balancing-preset JSON, plus an optional text-free icon-grid
+PNG with `--icons-only`.
 
 Add-ons are killer-side only. Survivor items and their add-ons are handled by the
 sibling `item-sheet-generator`; this tool only deals with the killer's power
@@ -25,10 +26,13 @@ node utilities/addon-sheet-generator/addon-sheet-generator.js \
 
 ```
 node utilities/addon-sheet-generator/addon-sheet-generator.js <file.yaml...>
+     [--asset-root <dir>] Repo root used to resolve canvas-image-library/ assets
+                          (default: DBD_BALANCING_TOOL_ROOT env var, else auto-detected)
      [--out <dir>]        Output directory (default: next to each input file)
      [--columns <n>]      Max icons per row within a rarity section (default: 8)
      [--preset <path>]    Also compile a BbD preset JSON from all input files
      [--name "<name>"]    Preset Name field (default: "Generated Add-on Allow-List")
+     [--icons-only]       Also write a text-free, transparent icon-grid PNG (see Output)
 ```
 
 ## YAML schema
@@ -79,7 +83,7 @@ unknown killer — the message names the offending token and the input file.
 
 ## Output
 
-One PNG file per killer into `<outDir>/`:
+One PNG file per killer into `<outDir>/` (plus one more with `--icons-only`, see below):
 - `<KillerSlug>-killer-addons.png`
 
 Add-ons are grouped into one labelled section per rarity, **in rarity order
@@ -92,6 +96,27 @@ Header shows: killer portrait, killer name, `Allowed Killer Add-ons`,
 `(N add-ons)`, and a provenance block with the `balancing` label (if set) and the
 auto-stamped generation timestamp. When `count == 0` the header renders with a
 "None allowed" note.
+
+### Icon-only sheets (`--icons-only`)
+
+When `--icons-only` is passed, one extra PNG per killer is written alongside the
+regular sheet:
+- `<KillerSlug>-killer-addons-icons.png`
+
+This is a stripped-down variant meant for reuse/compositing elsewhere (embedded in a
+post, a rules doc, a slide, or layered over another background) rather than as a
+finished deliverable:
+
+- Rarity sections stay stacked in the same order (Common → Ultra Rare), same
+  add-ons, same alphabetical order within a section, same `--columns` wrapping —
+  but with **no rarity labels** (and no left gutter reserved for them).
+- No header (no portrait, title, `(N add-ons)` line, or provenance/`Generated:`/
+  `Balancing:` block) — no text of any kind.
+- Fully transparent background, unlike the regular sheet's opaque `#100f16`.
+- Tight crop: no outer margin, and the width matches the largest rarity section's
+  column count (capped at `--columns`) rather than the full `--columns` width.
+- If there are zero allowed add-ons, the icon sheet is skipped entirely (no file
+  written, just a log note) — there's no text-free equivalent of "None allowed".
 
 ## Preset compilation (`--preset`)
 

@@ -16,8 +16,11 @@
  * Usage:
  *   node utilities/item-sheet-generator/item-sheet-generator.js <file.yaml...>
  *        [--asset-root <dir>] [--out <dir>] [--preset <out.json>] [--name "<name>"]
+ *        [--icons-only]
  *
  * Sheets are written next to each input file by default; --out overrides this.
+ * --icons-only additionally renders a text-free, transparent-background icon-strip
+ * variant of each sheet (see renderIconSheet).
  */
 
 const fs   = require('fs');
@@ -174,6 +177,7 @@ function parseArgs(argv) {
         outDir: null,
         presetPath: null,
         presetName: 'Generated Item Allow-List',
+        iconsOnly: false,
     };
     let i = 0;
     while (i < argv.length) {
@@ -186,6 +190,9 @@ function parseArgs(argv) {
             args.presetName = argv[++i];
         } else if (a === '--asset-root' && argv[i + 1]) {
             i++;
+        } else if (a === '--icons-only') {
+            // Boolean flag: unlike the others above, this does not consume a value.
+            args.iconsOnly = true;
         } else if (!a.startsWith('--')) {
             args.files.push(a);
         } else {
@@ -556,6 +563,20 @@ function drawScopeChip(ctx, x, y, w, h, color, label) {
 }
 
 /**
+ * Group allowed variants by item type (types with none are skipped), preserving
+ * item-type order. Each group carries its type's allowed add-ons for the row strips.
+ * Shared by renderSheet and renderIconSheet so the grouping logic lives in one place.
+ */
+function buildItemGroups(types) {
+    const groups = [];
+    for (const { type, allowedVariants, allowedAddons } of types) {
+        if (allowedVariants.length === 0) continue;
+        groups.push({ typeName: type.Name, variants: allowedVariants, addons: allowedAddons });
+    }
+    return groups;
+}
+
+/**
  * Body layout: each item-type group renders a type header followed by one row per allowed
  * variant. Returns positioned elements (y relative to the body top) plus the total bodyH,
  * so the canvas can be sized and the body drawn from one shared computation.
@@ -567,6 +588,29 @@ function computeBodyLayout(groups) {
         if (gi > 0) y += GROUP_GAP;
         elements.push({ kind: 'header', typeName: g.typeName, y });
         y += TYPE_HEADER_H;
+        g.variants.forEach((variant, vi) => {
+            elements.push({ kind: 'row', variant, addons: g.addons, y });
+            y += ROW_H;
+            if (vi < g.variants.length - 1) y += ROW_GAP;
+        });
+    });
+    return { elements, bodyH: y };
+}
+
+/**
+ * Body layout variant for --icons-only: the same row-per-variant structure as
+ * computeBodyLayout, but with the type headers dropped entirely (see renderIconSheet's
+ * doc comment for why) and the inter-group gap widened to GROUP_GAP + ROW_GAP. With the
+ * 38px TYPE_HEADER_H gone, the plain GROUP_GAP (14) would be *smaller* than the
+ * intra-group ROW_GAP (16), so item types would visually read as tighter than the rows
+ * within them — the grouping would invert and become misleading. Widening the group gap
+ * to GROUP_GAP + ROW_GAP keeps the grouping legible without any labels.
+ */
+function computeIconBodyLayout(groups) {
+    const elements = [];
+    let y = 0;
+    groups.forEach((g, gi) => {
+        if (gi > 0) y += GROUP_GAP + ROW_GAP;
         g.variants.forEach((variant, vi) => {
             elements.push({ kind: 'row', variant, addons: g.addons, y });
             y += ROW_H;
@@ -720,11 +764,7 @@ async function renderSheet(killer, types, killerSlug, outDir, balancing, dateLab
 
     // Group allowed variants by item type (types with none are skipped), preserving
     // item-type order. Each group carries its type's allowed add-ons for the row strips.
-    const groups = [];
-    for (const { type, allowedVariants, allowedAddons } of types) {
-        if (allowedVariants.length === 0) continue;
-        groups.push({ typeName: type.Name, variants: allowedVariants, addons: allowedAddons });
-    }
+    const groups = buildItemGroups(types);
 
     const variantCount = groups.reduce((n, g) => n + g.variants.length, 0);
     const maxAddons = groups.reduce((m, g) => Math.max(m, g.addons.length), 0);
@@ -952,6 +992,76 @@ async function renderSheet(killer, types, killerSlug, outDir, balancing, dateLab
     return outFile;
 }
 
+/**
+ * Render the --icons-only variant: just the allowed-item rows (each variant icon plus
+ * its type's allowed add-on strip), no type headers, no header/provenance block, no
+ * limit sections, no text at all, tightly cropped to the body's own bounding box on a
+ * fully transparent background. Meant to be composited over other art (e.g. a stream
+ * overlay), so unlike renderSheet it deliberately skips the BG_COLOR fillRect — a
+ * fresh canvas context starts fully transparent, and PNG output preserves that alpha.
+ * Type headers are dropped because they are pure text plus a decorative #2a2833 rule,
+ * which would show as an opaque stroke on an otherwise transparent sheet — see
+ * computeIconBodyLayout for the resulting widened inter-group gap. Returns null
+ * (writing nothing) when there are no allowed variants at all, since neither an empty
+ * canvas nor a text note make sense here.
+ */
+async function renderIconSheet(groups, killerSlug, outDir) {
+    const variantCount = groups.reduce((n, g) => n + g.variants.length, 0);
+    if (variantCount === 0) return null;
+
+    const maxAddons = groups.reduce((m, g) => Math.max(m, g.addons.length), 0);
+    const width = maxAddons > 0
+        ? ITEM_ICON + GAP + (maxAddons * (ADDON_ICON + GAP) - GAP)
+        : ITEM_ICON;
+
+    const bodyLayout = computeIconBodyLayout(groups);
+    const height = bodyLayout.bodyH;
+
+    const canvas = createCanvas(width, height);
+    const ctx    = canvas.getContext('2d');
+    // No background fill here — see doc comment above.
+
+    // Preload variant + add-on icons for every row element (same preload pattern as
+    // renderSheet's rowElements loop).
+    const rowElements = bodyLayout.elements; // icons-only layout emits rows only
+    const loaded = await Promise.all(rowElements.map(async (el) => {
+        const variantImg = await loadImage(pngFromIcon(PNG_ITEMS, el.variant.icon)).catch(() => null);
+        const addonImgs = await Promise.all(
+            el.addons.map(a => loadImage(pngFromIcon(PNG_ADDONS, a.icon)).catch(() => null))
+        );
+        return { variantImg, addonImgs };
+    }));
+
+    for (let i = 0; i < rowElements.length; i++) {
+        const el = rowElements[i];
+        const { variantImg, addonImgs } = loaded[i];
+
+        if (variantImg) {
+            ctx.drawImage(variantImg, 0, el.y, ITEM_ICON, ITEM_ICON);
+        } else {
+            // No opaque placeholder here — it would punch a hole in the transparency.
+            // Skip the cell and just warn.
+            console.warn(`WARNING: missing icon for item "${el.variant.Name}"; skipping cell.`);
+        }
+
+        const ay = el.y + Math.round((ROW_H - ADDON_ICON) / 2);
+        for (let j = 0; j < el.addons.length; j++) {
+            const x = ITEM_ICON + GAP + j * (ADDON_ICON + GAP);
+            const img = addonImgs[j];
+            if (img) {
+                ctx.drawImage(img, x, ay, ADDON_ICON, ADDON_ICON);
+            } else {
+                // No opaque placeholder here — it would punch a hole in the transparency.
+                console.warn(`WARNING: missing icon for add-on "${el.addons[j].Name}"; skipping cell.`);
+            }
+        }
+    }
+
+    const outFile = path.join(outDir, `${killerSlug}-items-icons.png`);
+    fs.writeFileSync(outFile, canvas.toBuffer('image/png'));
+    return outFile;
+}
+
 // ---------------------------------------------------------------------------
 // Preset compilation
 // ---------------------------------------------------------------------------
@@ -1025,7 +1135,8 @@ async function main() {
     if (args.files.length === 0) {
         console.log(
             'Usage: node item-sheet-generator.js <file.yaml...>\n' +
-            '       [--asset-root <dir>] [--out <dir>] [--preset <out.json>] [--name "<name>"]'
+            '       [--asset-root <dir>] [--out <dir>] [--preset <out.json>] [--name "<name>"]\n' +
+            '       [--icons-only]'
         );
         process.exit(0);
     }
@@ -1052,15 +1163,23 @@ async function main() {
         const sheetOut = await renderSheet(killer, types, killerSlug, outDir, balancing, dateLabel, limits);
 
         const variantCount = types.reduce((n, t) => n + t.allowedVariants.length, 0);
-        console.log(
+        let summary =
             `[${killer.Name}]\n` +
             `  Allowed items: ${variantCount}\n` +
             types
                 .filter(t => t.allowedVariants.length > 0)
                 .map(t => `    ${t.type.Name}: ${t.allowedVariants.length} item(s), ${t.allowedAddons.length} add-on(s)`)
                 .join('\n') +
-            `\n  Sheet → ${sheetOut}`
-        );
+            `\n  Sheet → ${sheetOut}`;
+
+        // Optional text-free, transparent-background icon-strip variant.
+        if (args.iconsOnly) {
+            const groups = buildItemGroups(types);
+            const iconsOut = await renderIconSheet(groups, killerSlug, outDir);
+            summary += `\n  Item icons    → ${iconsOut || '(skipped — no allowed items)'}`;
+        }
+
+        console.log(summary);
 
         results.push(result);
     }

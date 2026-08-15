@@ -3,7 +3,7 @@
 A standalone CLI tool that reads a YAML file describing one killer's *allowed survivor items*
 and produces a single PNG "allowed items" sheet — **one row per allowed item variant**, showing
 that variant alongside the add-ons allowed for its item type — plus an optional BbD
-balancing-preset JSON.
+balancing-preset JSON, plus an optional text-free icon-strip PNG with `--icons-only`.
 
 Items are **survivor-only**, so (unlike the perk sheet generator) there is no killer side.
 Killer power add-ons are out of scope; this tool only produces `ItemWhitelist` + `AddonWhitelist`.
@@ -24,9 +24,12 @@ node utilities/item-sheet-generator/item-sheet-generator.js \
 
 ```
 node utilities/item-sheet-generator/item-sheet-generator.js <file.yaml...>
+     [--asset-root <dir>] Repo root used to resolve canvas-image-library/ assets
+                          (default: DBD_BALANCING_TOOL_ROOT env var, else auto-detected)
      [--out <dir>]        Output directory (default: next to each input file)
      [--preset <path>]    Also compile a BbD preset JSON from all input files
      [--name "<name>"]    Preset Name field (default: "Generated Item Allow-List")
+     [--icons-only]       Also write a text-free, transparent icon-strip PNG (see Output)
 ```
 
 ## Data model (why it looks the way it does)
@@ -173,7 +176,7 @@ from that limit; an unknown name/type is a hard error.
 
 ## Output
 
-One PNG per input file into `<outDir>/`:
+One PNG per input file into `<outDir>/` (plus one more with `--icons-only`, see below):
 - `<KillerSlug>-items.png`
 
 Layout: a dark header (killer portrait, the title **"Going against: \<killer\>"** — survivors bring
@@ -185,7 +188,32 @@ the auto-stamped generation timestamp). Below the header the allowed items are g
 allowed variant — the variant icon and its type's allowed add-on icons in a strip. Rows with no
 allowed add-ons show "(no add-ons allowed)". Finally, any **Duplicate Limit** and **Pick Limits**
 sections render below the grid, each with a scope chip, a plain-English rule sentence, and the
-affected item icons. Missing icons fall back to a grey placeholder box.
+affected item icons. Missing icons fall back to a grey placeholder box on the regular sheet (the
+`--icons-only` variant below deliberately does not).
+
+### Icon-only sheets (`--icons-only`)
+
+When `--icons-only` is passed, one extra PNG per killer is written alongside the regular sheet:
+- `<KillerSlug>-items-icons.png`
+
+This is a stripped-down variant meant for reuse/compositing elsewhere (embedded in a post, a rules
+doc, a slide, or layered over another background) rather than as a finished deliverable:
+
+- Same row-per-variant body as the regular sheet — the variant icon and its type's allowed add-on
+  strip, one row per allowed variant, same order and geometry.
+- No item-type section headers (they're pure text plus a decorative rule that would show as an
+  opaque stroke on a transparent sheet) — the gap between item-type groups is correspondingly
+  widened so the grouping still reads without labels.
+- No header (no portrait, title, side label, item count, restriction counts, or
+  provenance/`Generated:`/`Balancing:` block), no **Duplicate Limit** / **Pick Limits** sections,
+  and no "(no add-ons allowed)" note — no text of any kind.
+- Fully transparent background, unlike the regular sheet's opaque `#100f16`.
+- Tight crop: no outer margin, and the sheet width is set once for the whole sheet by the widest
+  group's add-on strip — a group with fewer add-ons (or none, like a bare item column) leaves
+  transparent space to the right of its rows rather than being cropped narrower, so every row's
+  item column and add-on columns stay vertically aligned across groups.
+- If there are zero allowed item variants across every type, the icon sheet is skipped entirely
+  (no file written, just a log note) — there's no text-free equivalent of "No items allowed".
 
 ## Preset compilation (`--preset`)
 
