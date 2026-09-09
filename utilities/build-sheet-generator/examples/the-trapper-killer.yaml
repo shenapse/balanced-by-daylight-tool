@@ -1,0 +1,52 @@
+# Build sheet example: The Trapper (killer side)
+# Run from the repo root:
+#   node utilities/build-sheet-generator/build-sheet-generator.js \
+#        utilities/build-sheet-generator/examples/the-trapper-killer.yaml \
+#        --out utilities/build-sheet-generator/output
+#
+# Add --rules to flag illegal picks against an existing allow-list (they stay
+# in the sheet, just outlined in red):
+#   node utilities/build-sheet-generator/build-sheet-generator.js \
+#        utilities/build-sheet-generator/examples/the-trapper-killer.yaml \
+#        --out utilities/build-sheet-generator/output \
+#        --rules sheetdata/examples/the-trapper.yaml
+
+killer: The Trapper           # required; matched against Killers.json Name + Aliases
+
+# Optional label identifying which balancing ruleset these builds were played under.
+# Rendered top-right; purely informational, not consumed by --rules.
+balancing: DBDLeague
+
+builds:                       # 1-4 rows, each an alternate loadout for this killer
+
+  # Row 1: a clean, fully legal build (4 perks, 2 add-ons, an offering) — the
+  # baseline row, with no --rules violations, so the sheet isn't wall-to-wall red.
+  - perks:
+      - Corrupt Intervention
+      - Discordance
+      - Lethal Pursuer
+      - Bitter Murmur
+    addons: [Trapper Bag, Bloody Coil]     # both from The Trapper's own pool in NewAddons.json
+    offering: Ebony Memento Mori           # from Offerings.json Killer[]
+
+  # Row 2: only 3 perks -> exercises the blank perk slot. Also plants a
+  # killerComboBans violation: this exact pair is banned together in
+  # sheetdata/examples/the-trapper.yaml, even though each perk is individually
+  # legal there.
+  - perks:
+      - "Scourge Hook: Pain Resonance"   # names with a colon MUST be quoted in YAML
+      - Pop Goes the Weasel              # together with the above: banned by killerComboBans
+      - Sloppy Butcher                   # legal filler perk
+    addons: [Honing Stone, Iridescent Stone]
+    offering: Ivory Memento Mori
+
+  # Row 3: 4 perks, but only 1 add-on -> exercises the blank add-on slot, and no
+  # offering -> exercises the blank offering slot. Also plants two individual
+  # killerPerks.deny violations.
+  - perks:
+      - Dead Man's Switch     # denied by sheetdata/examples/the-trapper.yaml killerPerks.deny
+      - Starstruck             # also denied there (The Trickster perk)
+      - Nowhere to Hide
+      - Territorial Imperative
+    addons: [Tar Bottle]      # only 1 -> 1 blank add-on slot
+    # no offering -> blank offering slot
