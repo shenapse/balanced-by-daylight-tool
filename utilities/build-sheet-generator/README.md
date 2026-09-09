@@ -49,7 +49,7 @@ Killer side:
 
 ```yaml
 killer: The Trapper           # required; matched against Killers.json Name + Aliases
-balancing: DBDLeague          # optional; rendered top-right, purely informational
+balancing: DBDLeague          # optional; rendered as a second header line under the title
 # title: "Grand Finals — Map 3"   # optional; overrides the default header title text
 
 builds:                       # 1-4 rows, each an alternate loadout for this killer
@@ -69,7 +69,7 @@ builds:                       # 1-4 rows, each an alternate loadout for this kil
 Survivor side:
 
 ```yaml
-killer: The Trapper           # OPTIONAL; drives the "Going against:" header + portrait
+killer: The Trapper           # OPTIONAL; drives the "Going against:" header + killer art
 balancing: DBDLeague
 
 survivors:                    # 1-4 rows, one loadout per survivor
@@ -118,23 +118,39 @@ row, and a file with both `builds:` and `survivors:` (or neither).
 `KillerSlug` is `killer.Name` with spaces replaced by dashes (`The Trapper` → `The-Trapper`),
 matching the siblings.
 
-The header shows the killer portrait (when a killer is set), a title — the killer's name on a
-killer sheet, `Going against: <Killer Name>` on a survivor sheet with a killer (or `Survivor
-Builds` without one) — a subtitle (`Killer Builds` / `Survivor Builds`), a `(N builds)` count, and
-a right-aligned provenance block (`Generated:` timestamp, plus `Balancing:` if set). Below that,
-one row per build: 4 perk icons, then the offering, then (survivor side only) the item, then up to
-2 add-ons, left to right. Smaller icons are vertically centred against the tallest (perk/offering)
-icons in the row rather than top- or bottom-aligned.
+The canvas is a fixed 1280px wide; height is dynamic — 1-4 rows, plus the Violations section when
+`--rules` finds anything. A 4-row survivor sheet with no `--rules` comes out exactly 1280×720.
+
+This is the live site's own layout (`canvasGenerator.js:594`), not a bespoke one: a large
+full-body killer render bleeds up the left edge of the row area at 80% opacity, drawn before the
+rows so it sits behind them, and each build row is drawn on a translucent `#25233380` panel that
+overlaps it. There is no small square portrait anymore.
+
+The header is compact and two-line, on the left: `Playing as: <Killer>` on a killer sheet,
+`Going against: <Killer>` on a survivor sheet that names a `killer:` (or just `Survivor Builds`
+with no killer) — a YAML `title:` still overrides this whole line. A second line, `Balancing:
+<name>`, appears only when `balancing:` is set. Top-right: `Image Date: <timestamp> UTC`, and —
+only when `--rules` was passed — a status line below it, green `No violations found` or red `N
+violations found`. There is no subtitle, no `(N builds)` count, and no `(N violations)` count;
+the tool also does not render the live site's `balancedbydaylight.com` watermark or logo.
+
+Below the header, one row per build: 4 perk icons, then the offering, then (survivor side only)
+the item, then up to 2 add-ons, left to right. Killer rows use the same x positions as survivor
+rows and simply leave the item column empty, so a killer sheet and a survivor sheet for the same
+match line up column-for-column. Smaller icons are vertically centred against the tallest
+(perk/offering) icons in the row rather than top- or bottom-aligned.
 
 ### Icon-only sheets (`--icons-only`)
 
-- Just the row strip — same rows, same slot order and sizing, no header and no text of any kind
-  (no portrait, title, count, or provenance block).
+- Just the row strip — same rows, same slot order and sizing, no header, no killer art, no
+  panels, and no text of any kind.
 - Fully transparent background, unlike the regular sheet's opaque `#100f16`.
 - Tight crop: no outer margin; the canvas is exactly the rows' own bounding box.
 - Empty slots still draw the game's `blank.png` art (it's art, not text, and dropping it would
   misalign the row), but the grey `#333333` placeholder used for a genuinely missing icon on the
   regular sheet is never drawn here — it would punch an opaque hole in the transparency.
+- On a killer sheet, the empty item column is still there as an internal transparent gap in the
+  strip — the price of sharing the survivor x-table for column alignment.
 - Violation outlines (see below) are still drawn.
 
 ## Validation (`--rules`)
@@ -181,7 +197,11 @@ Like its siblings, this tool reads from the repo's `canvas-image-library/` PNG m
   killer slug — `canvas-image-library/PowerAddons/` directories are named irregularly (`Trapper`,
   `GhostFace`, `SkullMerchant`, ...) and do not match the `The-Trapper` slug used for filenames.
 - Offering: `canvas-image-library/Offerings/<basename>.png`
-- Portrait: `canvas-image-library/Portraits/<basename>.png` (falls back to `Blank.png`)
+- Killer art: `canvas-image-library/lore/<basename>.png`, resolved from `Killers.json`'s
+  `LorePortrait` field and matched case-insensitively — that field disagrees on case for one
+  entry (`Ghostface.webp` vs. the file `GhostFace.png`). Unlike `Portraits/`, `lore/` has no
+  `Blank.png` fallback: when nothing matches, the sheet simply renders without the art rather
+  than crashing.
 - Empty slots: `canvas-image-library/{Perks,Items,Addons,Offerings}/blank.png`
   (`Addons/blank.png` is shared by killer power add-ons and item add-ons alike)
 

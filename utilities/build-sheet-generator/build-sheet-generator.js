@@ -65,7 +65,7 @@ const PNG_PERKS_BASE = path.join(PNG_LIBRARY, 'Perks');
 const PNG_ITEMS      = path.join(PNG_LIBRARY, 'Items');
 const PNG_ADDONS     = path.join(PNG_LIBRARY, 'Addons');
 const PNG_OFFERINGS  = path.join(PNG_LIBRARY, 'Offerings');
-const PNG_PORTRAITS  = path.join(PNG_LIBRARY, 'Portraits');
+const PNG_LORE       = path.join(PNG_LIBRARY, 'lore');
 
 // Empty-slot art. `Addons/blank.png` is shared by killer power add-ons AND item
 // add-ons — exactly what canvasGenerator.js:542 does upstream.
@@ -78,18 +78,26 @@ const BLANK_OFFERING = path.join(PNG_OFFERINGS, 'blank.png');
 // Layout constants
 // ---------------------------------------------------------------------------
 // Row order left -> right: 4 perks | offering | (item, survivor only) | 2 add-ons.
-// SLOT_GAP separates icons within a group; GROUP_GAP separates groups. All icon
-// sizes share one centreline on the ROW_H band (see rowSlots()).
+// Every number below is lifted from canvasGenerator.js:601-602, 726-733, 740-750,
+// 772-911 (GenerateSurvivorImage) — this tool reproduces that renderer's sample
+// look (large killer art + translucent per-build panels) rather than the flat
+// icon-row style its perk-/addon-/item-sheet-generator siblings use.
 const PERK     = 118;
 const OFFERING = 118;
 const ITEM     = 88;
 const ADDON    = 68;
-const ROW_H    = 118;   // tallest slot; smaller icons are vertically centred on this band
-const SLOT_GAP  = 12;   // inside a group
-const GROUP_GAP = 36;   // between groups
-const ROW_GAP   = 20;   // between build rows
-const MARGIN    = 32;   // outer margin
-const HEADER_H  = 190;  // header height
+const CANVAS_W      = 1280;   // fixed; height stays dynamic (rows + optional Violations section)
+const HEADER_H      = 110;    // canvasGenerator: first panel at height-600-10 = 110
+const PANEL_X       = 270;    // = CANVAS_W - PANEL_W - 10
+const PANEL_W       = 1000;
+const PANEL_H       = 138;
+const PANEL_GAP     = 15;     // upstream padding 5 + margin 10 -> 153px pitch
+const PANEL_COLOR   = '#25233380';
+const BOTTOM_MARGIN = 13;     // makes a 4-row, rules-free survivor sheet exactly 1280x720
+const LORE_W        = 384;
+const LORE_H        = 761;
+const LORE_ALPHA    = 0.8;
+const MARGIN    = 32;   // the Violations section's inset only (rows use the x-table below)
 const BG_COLOR   = '#100f16';
 const TEXT_COLOR = '#ffffff';
 const VIOLATION_COLOR = '#e5484d';
@@ -803,46 +811,91 @@ function pngFromIcon(baseDir, iconPath) {
     return path.join(baseDir, basename);
 }
 
-function portraitPng(killer) {
-    const candidate = pngFromIcon(PNG_PORTRAITS, killer.Portrait || '');
-    if (fs.existsSync(candidate)) return candidate;
-    return path.join(PNG_PORTRAITS, 'Blank.png');
+// Directory listing for lore/, cached and read lazily (never touched at all when
+// a run has no killer, e.g. a killer-less survivor sheet). Backs lorePng()'s
+// case-insensitive rescan below.
+let loreDirEntries = null;
+function loreDirListing() {
+    if (loreDirEntries === null) {
+        loreDirEntries = fs.existsSync(PNG_LORE) ? fs.readdirSync(PNG_LORE) : [];
+    }
+    return loreDirEntries;
+}
+
+// Killers already warned about missing lore art, so a multi-file batch run only
+// warns once per killer rather than once per rendered sheet.
+const warnedMissingLore = new Set();
+
+/**
+ * Full-body killer art for the left edge, from Killers.json's LorePortrait.
+ * Unlike Portraits/, canvas-image-library/lore/ has NO Blank.png fallback, and
+ * at least one entry disagrees on case ("iconography/lore/Ghostface.webp" vs
+ * the file GhostFace.png) — hence the case-insensitive rescan. Returns null
+ * when there is genuinely no art; the sheet then renders without it.
+ */
+function lorePng(killer) {
+    const basename = path.basename(killer.LorePortrait || '').replace(/\.webp$/i, '.png');
+    if (!basename) return null;
+
+    const exact = path.join(PNG_LORE, basename);
+    if (fs.existsSync(exact)) return exact;
+
+    const lowerBasename = basename.toLowerCase();
+    const match = loreDirListing().find(f => f.toLowerCase() === lowerBasename);
+    if (match) return path.join(PNG_LORE, match);
+
+    if (!warnedMissingLore.has(killer.Name)) {
+        warnedMissingLore.add(killer.Name);
+        console.warn(
+            `WARNING: no lore art found for "${killer.Name}" (looked for "${basename}" in ` +
+            `${PNG_LORE}); rendering the sheet without it.`
+        );
+    }
+    return null;
 }
 
 // ---------------------------------------------------------------------------
 // Row layout
 // ---------------------------------------------------------------------------
+// x is relative to PANEL_X; y centres each icon on the PANEL_H band, which
+// reproduces upstream's per-group margins (10 / 10 / 25 / 35) exactly. Values
+// are canvasGenerator.js's absolute x's (:772-911) minus PANEL_X (270):
+//   perk     290, 418, 546, 674  -> 20, 148, 276, 404
+//   offering 842                -> 572
+//   item     1010 (survivor only) -> 740
+//   addon    1108, 1181         -> 838, 911
+// Upstream's inter-icon/inter-group gaps are NOT uniform (10px between perks,
+// 5px between add-ons, 50/50/10px between groups), so an accumulating
+// addGroup-style loop can't reproduce them — hence the explicit table instead.
+const SLOT_X = {
+    perk:     [20, 148, 276, 404],
+    offering: [572],
+    item:     [740],
+    addon:    [838, 911],
+};
+
 /**
  * Pure layout helper: lays out one build row's slots left -> right and returns
- * their positions plus the row's total width. Icons are vertically centred on
- * the ROW_H band (y = round((ROW_H - size) / 2)), reproducing upstream's size
- * hierarchy without drawing its opaque container plate.
- *
- * Survivor row: 4 perks | offering | item | 2 add-ons  -> rowW 970
- *   perks 0,130,260,390 · offering 544 · item 698 · addons 822,902
- * Killer row:   4 perks | offering | 2 add-ons          -> rowW 846
- *   perks 0,130,260,390 · offering 544 · addons 698,778
+ * their positions. Icons are vertically centred on the PANEL_H band
+ * (y = round((PANEL_H - size) / 2)); x comes straight from SLOT_X above. The
+ * killer row simply omits the item column and leaves that gap empty, so a
+ * killer sheet and a survivor sheet for the same match line up column-for-column.
  *
  * @param {boolean} isSurvivor
  * @returns {{ slots: Array<{kind:string, index:number, size:number, x:number, y:number}>, width: number }}
  */
 function rowSlots(isSurvivor) {
     const slots = [];
-    let x = 0;
-    const addGroup = (kind, count, size) => {
-        for (let i = 0; i < count; i++) {
-            slots.push({ kind, index: i, size, x, y: Math.round((ROW_H - size) / 2) });
-            x += size + SLOT_GAP;
-        }
-        x -= SLOT_GAP;   // drop the trailing intra-group gap
-        x += GROUP_GAP;  // gap before the next group
+    const pushGroup = (kind, size, xs) => {
+        xs.forEach((x, i) => {
+            slots.push({ kind, index: i, size, x, y: Math.round((PANEL_H - size) / 2) });
+        });
     };
-    addGroup('perk', 4, PERK);
-    addGroup('offering', 1, OFFERING);
-    if (isSurvivor) addGroup('item', 1, ITEM);
-    addGroup('addon', 2, ADDON);
-    x -= GROUP_GAP; // no trailing group gap after the last group
-    return { slots, width: x };
+    pushGroup('perk', PERK, SLOT_X.perk);
+    pushGroup('offering', OFFERING, SLOT_X.offering);
+    if (isSurvivor) pushGroup('item', ITEM, SLOT_X.item);
+    pushGroup('addon', ADDON, SLOT_X.addon);
+    return { slots, width: PANEL_W };
 }
 
 /** Read the resolved record (or null) a given slot draws for one row. */
@@ -1418,8 +1471,8 @@ function buildViolationsLayout(violations, rulesPath, bodyWidth, measure) {
 
 /**
  * Draw a previously-built violations layout starting at `startY` (the bottom of
- * the row area, i.e. HEADER_H + MARGIN + bodyH — NOT including the canvas's
- * final bottom margin, exactly like drawLimitSection's `gridBottom` convention).
+ * the row area, i.e. HEADER_H + rowBandH — NOT including the canvas's
+ * BOTTOM_MARGIN, exactly like drawLimitSection's `gridBottom` convention).
  */
 function drawViolationsSection(ctx, layout, startY, width) {
     let y = startY + SECTION_GAP;
@@ -1472,142 +1525,145 @@ async function preloadRowIcons(rows, slots) {
 }
 
 /**
- * Render the full sheet: header (portrait, title/subtitle, count, provenance)
- * followed by one icon row per build. Copies the sibling header block's style
- * (portrait sizing, the createCanvas(1,1) measure-context trick, right-aligned
- * Generated:/Balancing: meta) — see perk-sheet-generator.js:1206-1310.
+ * Render the full sheet: a fixed 1280-wide canvas with the sample's large
+ * killer render bleeding up the left edge, translucent per-build panels
+ * overlapping that art, and a compact two-line header — the visual language of
+ * canvasGenerator.js:594 (GenerateSurvivorImage), NOT the portrait+title/
+ * subtitle/count header its perk-/addon-/item-sheet-generator siblings use.
+ * Height is dynamic (HEADER_H + the row band + BOTTOM_MARGIN + an optional
+ * Violations section); width never varies. Draw order matters here — it is
+ * what produces the sample's overlap: background, then lore art (clipped to
+ * the row band), then the translucent panels over it, then icons+outlines,
+ * then header text on top of everything, then the Violations section.
  */
-async function renderSheet(model, outDir, dateLabel) {
+async function renderSheet(model, outDir, dateStamp) {
     const isSurvivor = model.isSurvivorSheet;
-    const { slots, width: rowW } = rowSlots(isSurvivor);
+    const { slots } = rowSlots(isSurvivor);
     const rows = model.rows;
     const n = rows.length;
+    const rowBandH = n * PANEL_H + (n - 1) * PANEL_GAP;
 
-    // Load the portrait up front so its width feeds into the layout below.
-    // When there is no killer at all (survivor sheet without `killer:`), this is
-    // a first-class case — portraitImg is explicitly null, not a swallowed load
-    // error — so textX correctly falls back to MARGIN.
-    let portraitImg = null;
+    // Load the killer's lore art up front (killer sheets always name a killer;
+    // survivor sheets only when `killer:` was given). lorePng() itself covers
+    // "no art exists for this killer" (returns null, warns once); a load
+    // failure on a path it DID resolve is the same "render without it"
+    // outcome, just from a different cause, so both funnel into loreImg=null.
+    let loreImg = null;
     if (model.killer) {
-        try {
-            portraitImg = await loadImage(portraitPng(model.killer));
-        } catch (e) {
-            // fallback: no portrait (load error, not the no-killer case above)
+        const lorePath = lorePng(model.killer);
+        if (lorePath) {
+            try {
+                loreImg = await loadImage(lorePath);
+            } catch (e) {
+                // fallback: no lore art (load error, not the no-art case above)
+            }
         }
     }
 
-    const portraitH = HEADER_H - MARGIN;
-    const portraitW = portraitImg
-        ? Math.round((portraitImg.width / portraitImg.height) * portraitH)
-        : 0;
-    const textX = portraitImg ? MARGIN + portraitW + 16 : MARGIN;
-
-    let titleText;
-    if (model.title) {
-        titleText = model.title;
-    } else if (isSurvivor) {
-        titleText = model.killer ? `Going against: ${model.killer.Name}` : 'Survivor Builds';
-    } else {
-        titleText = model.killer.Name;
-    }
-    const subtitleText = isSurvivor ? 'Survivor Builds' : 'Killer Builds';
-    const countLabel = `(${n} build${n === 1 ? '' : 's'})`;
-    // --rules: null when validation wasn't requested at all (no extra header
-    // line, no outlines, no section); an array (possibly empty) once it was.
+    // --rules: null when validation wasn't requested at all (no status line,
+    // no outlines, no section); an array (possibly empty) once it was.
     const hasRules = Array.isArray(model.violations);
-    const violCountLabel = hasRules
-        ? `(${model.violations.length} violation${model.violations.length === 1 ? '' : 's'})`
-        : '';
 
-    const bodyWidth = MARGIN * 2 + rowW;
+    // --- Header text plan ---
+    // A YAML `title:` override renders whole, with no prefix. Otherwise: killer
+    // sheets get 'Playing as: <Killer>'; a survivor sheet that names a killer
+    // gets 'Going against: <Killer>'; a killer-less survivor sheet gets no
+    // prefix at all and falls back to the plain 'Survivor Builds' name.
+    let prefix = '';
+    let nameText = null;
+    if (!model.title) {
+        if (!isSurvivor) {
+            prefix = 'Playing as: ';
+            nameText = model.killer.Name;
+        } else if (model.killer) {
+            prefix = 'Going against: ';
+            nameText = model.killer.Name;
+        } else {
+            nameText = 'Survivor Builds';
+        }
+    }
 
+    // Measure the title line's height from the NAME, not the prefix —
+    // canvasGenerator.js:620-622 measures its prefix (always non-empty there),
+    // but this tool's killer-less survivor case has prefix === '', which would
+    // collapse titleH to 0 if measured the same way.
     const measure = createCanvas(1, 1).getContext('2d');
-    measure.font = '700 30pt sans-serif';
-    const titleW = measure.measureText(titleText).width;
-    measure.font = '400 18pt sans-serif';
-    const subW = measure.measureText(subtitleText).width;
-    measure.font = '400 16pt sans-serif';
-    const countW = measure.measureText(countLabel).width;
-    const violCountW = hasRules ? measure.measureText(violCountLabel).width : 0;
-    const leftMaxW = Math.max(titleW, subW, countW, violCountW);
-    measure.font = '400 13pt sans-serif';
-    const genW = measure.measureText(`Generated: ${dateLabel}`).width;
-    const balW = model.balancing ? measure.measureText(`Balancing: ${model.balancing}`).width : 0;
-    const metaMaxW = Math.max(genW, balW);
+    measure.font = '700 24pt sans-serif';
+    const titleMetrics = measure.measureText(model.title || nameText);
+    const titleH = titleMetrics.actualBoundingBoxAscent + titleMetrics.actualBoundingBoxDescent;
 
-    const leftNeed = textX + leftMaxW + MARGIN;
-    const metaNeed = textX + metaMaxW + MARGIN; // textX floor also clears the portrait
-
-    const bodyH = n * ROW_H + (n - 1) * ROW_GAP;
-
-    // --rules: lay out the Violations section now (before the width/height are
-    // finalized below) so its own width/height can be folded into them.
+    // --rules: lay out the Violations section now (before the canvas height is
+    // finalized below) so its height can be folded in. bodyWidth is always
+    // CANVAS_W now — this sheet's width never varies with content.
     const violationsLayout = hasRules
-        ? buildViolationsLayout(model.violations, model.rulesPath, bodyWidth, measure)
+        ? buildViolationsLayout(model.violations, model.rulesPath, CANVAS_W, measure)
         : null;
-    const violationsW = violationsLayout ? violationsLayout.width : 0;
     const violationsH = violationsLayout ? violationsLayout.height : 0;
 
-    // Width: max of the row strip, the header text and the violations section,
-    // exactly as perk-sheet-generator.js:1268-1274 does it (plus violationsW).
-    const width = Math.ceil(Math.max(bodyWidth, leftNeed, metaNeed, violationsW));
-
-    // Height: header + rows + violations, exactly as item-sheet-generator.js's
-    // `HEADER_H + MARGIN + bodyH + MARGIN + repH + pickH` pattern — the second
-    // MARGIN here doubles as the section's leading gap AND the canvas's trailing
-    // bottom padding (see drawViolationsSection's doc comment).
-    const height = HEADER_H + MARGIN + bodyH + MARGIN + violationsH;
+    const width = CANVAS_W;
+    const height = HEADER_H + rowBandH + BOTTOM_MARGIN + violationsH;
 
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
-    // Background
+    // 1. Background
     ctx.fillStyle = BG_COLOR;
     ctx.fillRect(0, 0, width, height);
 
-    // --- Header ---
-    if (portraitImg) {
-        ctx.drawImage(portraitImg, MARGIN, MARGIN, portraitW, portraitH);
+    // 2. Lore art, clipped to the row band so it can never bleed into the
+    // Violations section below it. Fixed 384x761 anchored top-left of the
+    // band, exactly as canvasGenerator.js:726-733 — on a 4-row sheet it runs
+    // off the bottom just like the sample; on a 1-2 row sheet the clip crops
+    // it to a head-and-shoulders slice, which is why the art is top-anchored
+    // rather than centred.
+    if (loreImg) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, HEADER_H, LORE_W, rowBandH);
+        ctx.clip();
+        ctx.globalAlpha = LORE_ALPHA;
+        ctx.drawImage(loreImg, 0, HEADER_H, LORE_W, LORE_H);
+        ctx.globalAlpha = 1;
+
+        // When a Violations section follows, the row-band clip above would
+        // otherwise cut the art off in a hard horizontal line straight across
+        // the killer's body, reading as a rendering bug rather than a crop —
+        // so dissolve the last ~90px of the band into BG_COLOR with a plain
+        // fillRect + linear gradient (still inside the clip; NOT
+        // 'destination-out', which would punch the opaque background itself
+        // through to transparency). This is conditional on violationsLayout
+        // specifically: without one, the cut sits BOTTOM_MARGIN (13px) below
+        // the fold and is already invisible, and bbd-sample.png has no
+        // equivalent transition to match — its art simply runs off the
+        // canvas's bottom edge — so fading unconditionally would wash out the
+        // bottom of the art in exactly the case meant to match the sample
+        // pixel-for-pixel.
+        if (violationsLayout) {
+            const fadeH = Math.min(90, rowBandH);
+            const fadeTop = HEADER_H + rowBandH - fadeH;
+            const gradient = ctx.createLinearGradient(0, fadeTop, 0, HEADER_H + rowBandH);
+            gradient.addColorStop(0, 'rgba(16, 15, 22, 0)'); // BG_COLOR (#100f16) fully transparent
+            gradient.addColorStop(1, BG_COLOR);
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, fadeTop, LORE_W, fadeH);
+        }
+
+        ctx.restore();
     }
 
-    ctx.fillStyle = TEXT_COLOR;
-    ctx.textBaseline = 'top';
-    ctx.font = '700 30pt sans-serif';
-    ctx.fillText(titleText, textX, MARGIN);
-
-    ctx.font = '400 18pt sans-serif';
-    ctx.fillText(subtitleText, textX, MARGIN + 46);
-
-    ctx.font = '400 16pt sans-serif';
-    ctx.fillStyle = '#aaaaaa';
-    ctx.fillText(countLabel, textX, MARGIN + 84);
-
-    if (hasRules) {
-        ctx.font = '400 14pt sans-serif';
-        ctx.fillStyle = '#888888';
-        ctx.fillText(violCountLabel, textX, MARGIN + 84 + 22);
+    // 3. Translucent per-build panels, painted over the art so it only shows
+    // through between x=0 and x=PANEL_X.
+    ctx.fillStyle = PANEL_COLOR;
+    for (let r = 0; r < n; r++) {
+        ctx.fillRect(PANEL_X, HEADER_H + r * (PANEL_H + PANEL_GAP), PANEL_W, PANEL_H);
     }
 
-    // Provenance: balancing ruleset + generation timestamp, bottom-aligned to portrait
-    ctx.font = '400 13pt sans-serif';
-    ctx.fillStyle = '#999999';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'bottom';
-    const metaRight = width - MARGIN;
-    ctx.fillText(`Generated: ${dateLabel}`, metaRight, HEADER_H);
-    if (model.balancing) {
-        ctx.fillText(`Balancing: ${model.balancing}`, metaRight, HEADER_H - 22);
-    }
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-
-    // --- Build rows ---
-    const rowTop = HEADER_H + MARGIN;
+    // 4. Icons + violation outlines
     const outlineSet = hasRules ? buildOutlineSet(model.violations) : null;
     const { flat, results } = await preloadRowIcons(rows, slots);
     flat.forEach(({ r, slot }, i) => {
-        const y = rowTop + r * (ROW_H + ROW_GAP) + slot.y;
-        const x = MARGIN + slot.x;
+        const y = HEADER_H + r * (PANEL_H + PANEL_GAP) + slot.y;
+        const x = PANEL_X + slot.x;
         const result = results[i];
         if (result.status === 'fulfilled') {
             ctx.drawImage(result.value, x, y, slot.size, slot.size);
@@ -1620,9 +1676,51 @@ async function renderSheet(model, outDir, dateLabel) {
         }
     });
 
-    // --- Violations section ---
+    // 5. Header text, drawn last so it sits above the art and panels, matching
+    // the sample's own draw order.
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = TEXT_COLOR;
+    if (model.title) {
+        ctx.font = '700 24pt sans-serif';
+        ctx.fillText(model.title, 10, 10, width);
+    } else {
+        ctx.font = '400 24pt sans-serif';
+        ctx.fillText(prefix, 10, 10, width);
+        const prefixW = ctx.measureText(prefix).width;
+        ctx.font = '700 24pt sans-serif';
+        ctx.fillText(nameText, 10 + prefixW, 10, width);
+    }
+
+    if (model.balancing) {
+        const balancingY = 20 + titleH;
+        ctx.font = '400 18pt sans-serif';
+        ctx.fillText('Balancing: ', 10, balancingY, width);
+        const balPrefixW = ctx.measureText('Balancing: ').width;
+        ctx.font = '700 18pt sans-serif';
+        ctx.fillText(model.balancing, 10 + balPrefixW, balancingY, width);
+    }
+
+    ctx.font = '700 14pt sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillStyle = TEXT_COLOR;
+    ctx.fillText(`Image Date: ${dateStamp} UTC`, width - 10, 10, width);
+
+    // Status line: only rendered when --rules was actually passed — a
+    // killer-less/rule-less sheet gets no right-hand line at all.
+    if (hasRules) {
+        const numViolations = model.violations.length;
+        const statusText = numViolations === 0
+            ? 'No violations found'
+            : `${numViolations} violation${numViolations === 1 ? '' : 's'} found`;
+        ctx.fillStyle = numViolations === 0 ? '#80ff80' : '#ff8080';
+        ctx.fillText(statusText, width - 10, 40, width);
+    }
+    ctx.textAlign = 'left';
+
+    // 6. Violations section
     if (violationsLayout) {
-        drawViolationsSection(ctx, violationsLayout, rowTop + bodyH, width);
+        drawViolationsSection(ctx, violationsLayout, HEADER_H + rowBandH, width);
     }
 
     const outFile = path.join(outDir, outputFilename(model, false));
@@ -1631,30 +1729,45 @@ async function renderSheet(model, outDir, dateLabel) {
 }
 
 /**
- * Render the --icons-only variant: just the row strip, no header, no text at
- * all, tightly cropped to the rows' own bounding box on a fully transparent
- * background. Reference implementation: addon-sheet-generator.js:478-530. Empty
- * slots still draw blank.png (it is art, not text, and all four blanks have
- * alpha-0 corners) so rows stay aligned; the opaque #333333 placeholder used in
- * renderSheet is deliberately NOT drawn here — it would punch a hole in the
- * transparency.
+ * Render the --icons-only variant: just the row strip, no header, no art, no
+ * panels, no text at all, tightly cropped to the rows' own bounding box on a
+ * fully transparent background. Reference implementation:
+ * addon-sheet-generator.js:478-530. Empty slots still draw blank.png (it is
+ * art, not text, and all four blanks have alpha-0 corners) so rows stay
+ * aligned; the opaque #333333 placeholder used in renderSheet is deliberately
+ * NOT drawn here — it would punch a hole in the transparency.
  */
 async function renderIconSheet(model, outDir) {
     const isSurvivor = model.isSurvivorSheet;
-    const { slots, width } = rowSlots(isSurvivor);
+    const { slots } = rowSlots(isSurvivor);
     const rows = model.rows;
     const n = rows.length;
-    const height = n * ROW_H + (n - 1) * ROW_GAP;
+
+    // slot.x starts at 20 (SLOT_X.perk[0]) and slot.y at 10 (PANEL_H-centring
+    // of the 118px perk icons), not 0 as in the siblings' flat layout — crop
+    // to the slots' own bounding box rather than assuming it starts at the
+    // canvas origin. On the killer side, the empty item column shows up as
+    // internal transparent space — the deliberate consequence of sharing the
+    // survivor x-table (see rowSlots()'s doc comment).
+    let minX = Infinity, minY = Infinity, maxRight = -Infinity;
+    for (const slot of slots) {
+        minX = Math.min(minX, slot.x);
+        minY = Math.min(minY, slot.y);
+        maxRight = Math.max(maxRight, slot.x + slot.size);
+    }
+
+    const width = maxRight - minX;
+    const height = n * PANEL_H + (n - 1) * PANEL_GAP - 2 * minY;
 
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
-    // No background fill here — see doc comment above.
+    // No background fill, no art, no panels — see doc comment above.
 
     const outlineSet = Array.isArray(model.violations) ? buildOutlineSet(model.violations) : null;
     const { flat, results } = await preloadRowIcons(rows, slots);
     flat.forEach(({ r, slot }, i) => {
-        const y = r * (ROW_H + ROW_GAP) + slot.y;
-        const x = slot.x;
+        const y = r * (PANEL_H + PANEL_GAP) + slot.y - minY;
+        const x = slot.x - minX;
         const result = results[i];
         if (result.status === 'fulfilled') {
             ctx.drawImage(result.value, x, y, slot.size, slot.size);
@@ -1696,10 +1809,12 @@ async function main() {
 
     const outDirOverride = args.outDir ? path.resolve(args.outDir) : null;
 
-    // Stamp the generation time once so a batch shares a consistent timestamp
+    // Stamp the generation time once so a batch shares a consistent timestamp.
+    // Full "YYYY-MM-DD HH:MM:SS" stamp, matching the sample's own Image Date
+    // line (canvasGenerator.js:671) — not just the date.
     const generatedAt = new Date();
     const generatedISO = generatedAt.toISOString();
-    const dateLabel = generatedISO.slice(0, 10);
+    const dateStamp = generatedISO.replace('T', ' ').replace(/\..+/, '');
 
     for (const filePath of args.files) {
         const absPath = path.resolve(filePath);
@@ -1720,7 +1835,7 @@ async function main() {
         const outDir = outDirOverride || path.dirname(absPath);
         fs.mkdirSync(outDir, { recursive: true });
 
-        const outFile = await renderSheet(model, outDir, dateLabel);
+        const outFile = await renderSheet(model, outDir, dateStamp);
 
         let summary =
             `[${path.basename(absPath)}]\n` +
