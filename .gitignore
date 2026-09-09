@@ -46,6 +46,9 @@ utilities/item-sheet-generator/output/*
 utilities/addon-sheet-generator/input/*
 utilities/addon-sheet-generator/output/*
 
+utilities/build-sheet-generator/input/*
+utilities/build-sheet-generator/output/*
+
 public/BalancingPresets/Autobalance/*
 autobalance-info/*
 
