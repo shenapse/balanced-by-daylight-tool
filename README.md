@@ -7,13 +7,14 @@ This repository is a **fork of the public [Balanced by Daylight](https://github.
 
 ## What this repo is for
 
-Three standalone CLI **sheet generators** under `utilities/`. Each reads a per-killer YAML allow-list and renders a PNG sheet (and can optionally compile an aggregated Balanced-by-Daylight balancing-preset JSON):
+Four standalone CLI **sheet generators** under `utilities/`. The first three each read a per-killer YAML *allow-list* and render a PNG sheet (and can optionally compile an aggregated Balanced-by-Daylight balancing-preset JSON); the fourth instead renders *specific builds* — what players actually brought, not what they were allowed to bring:
 
 | Tool | Directory | Input | Output |
 | ---- | --------- | ----- | ------ |
 | Perk Sheet Generator | [`utilities/perk-sheet-generator/`](utilities/perk-sheet-generator/README.md) | Killer's allowed perks (YAML) | `<killer>-killer-perks.png`, `<killer>-survivor-perks.png` |
 | Add-on Sheet Generator | [`utilities/addon-sheet-generator/`](utilities/addon-sheet-generator/README.md) | Killer's allowed power add-ons (YAML) | `<killer>-killer-addons.png` |
 | Item Sheet Generator | [`utilities/item-sheet-generator/`](utilities/item-sheet-generator/README.md) | Killer's allowed survivor items + add-ons (YAML) | `<killer>-items.png` |
+| Build Sheet Generator | [`utilities/build-sheet-generator/`](utilities/build-sheet-generator/README.md) | Specific killer or survivor builds actually played (YAML), optionally checked against an allow-list | `<killer>-killer-builds.png`, `<killer-or-file>-survivor-builds.png` |
 
 Each tool has its own detailed `README.md` covering the YAML schema, selectors, limits, and preset compilation — linked in the table above.
 
@@ -47,9 +48,17 @@ node utilities/addon-sheet-generator/addon-sheet-generator.js \
 node utilities/item-sheet-generator/item-sheet-generator.js \
      utilities/item-sheet-generator/examples/the-trapper.yaml \
      --out utilities/item-sheet-generator/output
+
+# Build sheets (specific killer/survivor loadouts actually played, optionally
+# checked against an allow-list with --rules)
+node utilities/build-sheet-generator/build-sheet-generator.js \
+     utilities/build-sheet-generator/examples/the-trapper-killer.yaml \
+     utilities/build-sheet-generator/examples/the-trapper-survivors.yaml \
+     --out utilities/build-sheet-generator/output \
+     --rules sheetdata/examples/the-trapper.yaml
 ```
 
-Common flags: `--out <dir>` (output directory), `--preset <path>` (also compile a BbD preset JSON), `--name "<name>"` (preset `Name` field). See each tool's README for the full flag list.
+Common flags: `--out <dir>` (output directory), `--asset-root <dir>` (repo root used to resolve assets), `--icons-only` (also write a text-free, transparent variant). The three allow-list tools additionally take `--preset <path>` (also compile a BbD preset JSON) and `--name "<name>"` (preset `Name` field); the Build Sheet Generator has neither, and takes `--rules <path>` instead. See each tool's README for the full flag list.
 
 ## Relationship to the upstream web app
 

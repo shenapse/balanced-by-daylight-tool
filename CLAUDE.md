@@ -64,6 +64,7 @@ Standalone scripts run directly, not part of the server. Node tools: `node <scri
 - `utilities/{killers,addon,map}-format-converter` — convert legacy `Old*`/`Legacy*` JSON to the `New*` formats the app consumes.
 - `utilities/{hue-shift-tool,image-crop-tool,image-resizer}` — batch image processing (sharp / node-canvas).
 - `utilities/autobalancer/autobalancer-dbdl.js` — league-specific balance-format converter (uses `natural`/Jaro-Winkler fuzzy name matching). Currently commented out in `autobalancer.js`.
+- `utilities/build-sheet-generator` — renders PNG sheets of specific killer/survivor builds actually played (not allow-lists), with an optional `--rules` check against an allow-list YAML.
 - `png_to_webp/`, `webp_to_png/` (Pillow), `name_conversion/` — asset filename/format normalization helpers.
 
 ## Conventions
