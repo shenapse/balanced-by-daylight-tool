@@ -49,6 +49,12 @@ utilities/addon-sheet-generator/output/*
 utilities/build-sheet-generator/input/*
 utilities/build-sheet-generator/output/*
 
+# The sheet generators are self-contained packages that can be installed on their
+# own (npm i ./utilities/build-sheet-generator), which drops a node_modules and,
+# for npm pack, a tarball inside the tool's directory.
+utilities/*/node_modules
+utilities/*/*.tgz
+
 public/BalancingPresets/Autobalance/*
 autobalance-info/*
 
