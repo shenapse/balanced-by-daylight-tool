@@ -20,6 +20,22 @@
  *   node utilities/build-sheet-generator/build-sheet-generator.js <file.yaml...>
  *        [--asset-root <dir>] [--out <dir>] [--rules <file.yaml>] [--icons-only]
  *
+ * Unlike its three siblings this file is BOTH the CLI and an importable module:
+ * it is packaged (`dbd-build-sheet-generator`, bin `dbd-build-sheet`) so it can be
+ * installed into another project and called from there. Three consequences shape
+ * the code below, all of them for the benefit of that outside caller:
+ *
+ *   - Requiring this file touches no filesystem and starts nothing. The CLI runs
+ *     only under `require.main === module`, and the entry points — runCli,
+ *     generateBuildSheets, loadBuildFile — live at the bottom.
+ *   - The asset root is resolved, and the game-data JSON parsed, once per run
+ *     rather than at module load, because an outside caller supplies the checkout
+ *     the icons come from: the ~155 MB canvas-image-library/ is not bundled. See
+ *     initialize().
+ *   - fatal() throws a BuildSheetError instead of calling process.exit, since a
+ *     library must not kill its host process. runCli() converts it back into the
+ *     same `ERROR: <msg>` on stderr and exit code 1 the CLI has always produced.
+ *
  * Sheets are written next to each input file by default; --out overrides this.
  * --icons-only additionally renders a text-free, transparent-background, tightly
  * cropped icon-strip variant of each sheet (see renderIconSheet).
@@ -40,39 +56,129 @@ const path = require('path');
 const yaml = require('js-yaml');
 const { createCanvas, loadImage } = require('canvas');
 
-function readOption(argv, flag) {
-    const index = argv.indexOf(flag);
-    if (index === -1 || !argv[index + 1]) return null;
-    return argv[index + 1];
+/**
+ * Thrown by fatal() for every authoring or usage error this tool detects: an
+ * unknown perk, malformed YAML, an unresolvable asset root, and so on. The CLI
+ * wrapper at the bottom of this file catches it, prints `ERROR: <message>` and
+ * exits 1 — exactly what fatal() used to do inline. It throws instead of exiting
+ * so that this module can be required from another project: a library must not
+ * kill its host process over a typo in someone's YAML. See runCli().
+ */
+class BuildSheetError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'BuildSheetError';
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Paths relative to the REPO ROOT (two levels up from __dirname)
+// The asset root, and every path derived from it
 // ---------------------------------------------------------------------------
-const REPO_ROOT = path.resolve(
-    readOption(process.argv.slice(2), '--asset-root') ||
-    process.env.DBD_BALANCING_TOOL_ROOT ||
-    path.join(__dirname, '..', '..')
-);
-const PERKS_FILE     = path.join(REPO_ROOT, 'public', 'Perks', 'dbdperks.json');
-const KILLERS_FILE   = path.join(REPO_ROOT, 'public', 'Killers.json');
-const ADDONS_FILE    = path.join(REPO_ROOT, 'public', 'NewAddons.json');
-const ITEMS_FILE     = path.join(REPO_ROOT, 'public', 'Items.json');
-const OFFERINGS_FILE = path.join(REPO_ROOT, 'public', 'Offerings.json');
-
-const PNG_LIBRARY    = path.join(REPO_ROOT, 'canvas-image-library');
-const PNG_PERKS_BASE = path.join(PNG_LIBRARY, 'Perks');
-const PNG_ITEMS      = path.join(PNG_LIBRARY, 'Items');
-const PNG_ADDONS     = path.join(PNG_LIBRARY, 'Addons');
-const PNG_OFFERINGS  = path.join(PNG_LIBRARY, 'Offerings');
-const PNG_LORE       = path.join(PNG_LIBRARY, 'lore');
+// Everything this tool reads lives inside a checkout of the balancing-tool repo:
+// the game-data JSON under public/, and the PNG mirror under canvas-image-library/
+// (~155 MB — far too large to bundle, which is why the root stays a pointer the
+// caller supplies rather than something shipped inside the package).
+//
+// The root is resolved, and the JSON loaded, ONCE PER RUN rather than at module
+// load. That is what lets this file be required from another project and aimed at
+// an arbitrary checkout; it also means nothing below is populated until
+// initialize() has run. Every entry point calls it first.
+let REPO_ROOT = null;
+let PERKS_FILE, KILLERS_FILE, ADDONS_FILE, ITEMS_FILE, OFFERINGS_FILE;
+let PNG_LIBRARY, PNG_PERKS_BASE, PNG_ITEMS, PNG_ADDONS, PNG_OFFERINGS, PNG_LORE;
 
 // Empty-slot art. `Addons/blank.png` is shared by killer power add-ons AND item
 // add-ons — exactly what canvasGenerator.js:542 does upstream.
-const BLANK_PERK     = path.join(PNG_PERKS_BASE, 'blank.png');
-const BLANK_ITEM     = path.join(PNG_ITEMS, 'blank.png');
-const BLANK_ADDON    = path.join(PNG_ADDONS, 'blank.png');
-const BLANK_OFFERING = path.join(PNG_OFFERINGS, 'blank.png');
+let BLANK_PERK, BLANK_ITEM, BLANK_ADDON, BLANK_OFFERING;
+
+// What makes a directory recognisable as an asset root. Both halves are needed:
+// a repo checkout without canvas-image-library/ can resolve every name in a YAML
+// and then render nothing but grey placeholder boxes.
+const ASSET_ROOT_MARKERS = [path.join('public', 'Killers.json'), 'canvas-image-library'];
+
+function looksLikeAssetRoot(dir) {
+    return ASSET_ROOT_MARKERS.every(marker => fs.existsSync(path.join(dir, marker)));
+}
+
+/**
+ * Walk up from `start` looking for a directory carrying both markers. This is the
+ * last-resort default only. It finds the repo when the tool is run from its usual
+ * home two levels down — or from anywhere else inside a checkout — and finds
+ * nothing, rather than guessing wrong, when the package has been installed into
+ * some unrelated project's node_modules.
+ */
+function searchUpForAssetRoot(start) {
+    let dir = path.resolve(start);
+    for (;;) {
+        if (looksLikeAssetRoot(dir)) return dir;
+        const parent = path.dirname(dir);
+        if (parent === dir) return null;
+        dir = parent;
+    }
+}
+
+/**
+ * Resolve the asset root for a run. Precedence: an explicit path (--asset-root,
+ * or the `assetRoot` option), then the DBD_BALANCING_TOOL_ROOT env var, then a
+ * search upwards from this file and from the working directory.
+ *
+ * An explicit root that fails the marker check is reported as the error rather
+ * than quietly discarded: a typo in --asset-root must not fall through to some
+ * other checkout that happens to sit above the working directory, since that
+ * would render a sheet from the wrong data instead of failing.
+ */
+function resolveAssetRoot(explicit) {
+    const given = explicit || process.env.DBD_BALANCING_TOOL_ROOT || null;
+    if (given) {
+        const root = path.resolve(given);
+        if (!looksLikeAssetRoot(root)) {
+            fatal(
+                `Asset root "${root}" does not look like a balancing-tool checkout — ` +
+                `expected both ${ASSET_ROOT_MARKERS.join(' and ')} inside it.`
+            );
+        }
+        return root;
+    }
+
+    const found = searchUpForAssetRoot(__dirname) || searchUpForAssetRoot(process.cwd());
+    if (!found) {
+        fatal(
+            'Cannot locate the balancing-tool assets. This tool draws its icons out of a ' +
+            'repo checkout (public/*.json plus canvas-image-library/, ~155 MB), which is ' +
+            'deliberately not bundled with the package. Point it at one with ' +
+            '--asset-root <dir>, or set the DBD_BALANCING_TOOL_ROOT environment variable.'
+        );
+    }
+    return found;
+}
+
+/** Assign REPO_ROOT and everything derived from it. */
+function setAssetRoot(root) {
+    REPO_ROOT = root;
+
+    PERKS_FILE     = path.join(REPO_ROOT, 'public', 'Perks', 'dbdperks.json');
+    KILLERS_FILE   = path.join(REPO_ROOT, 'public', 'Killers.json');
+    ADDONS_FILE    = path.join(REPO_ROOT, 'public', 'NewAddons.json');
+    ITEMS_FILE     = path.join(REPO_ROOT, 'public', 'Items.json');
+    OFFERINGS_FILE = path.join(REPO_ROOT, 'public', 'Offerings.json');
+
+    PNG_LIBRARY    = path.join(REPO_ROOT, 'canvas-image-library');
+    PNG_PERKS_BASE = path.join(PNG_LIBRARY, 'Perks');
+    PNG_ITEMS      = path.join(PNG_LIBRARY, 'Items');
+    PNG_ADDONS     = path.join(PNG_LIBRARY, 'Addons');
+    PNG_OFFERINGS  = path.join(PNG_LIBRARY, 'Offerings');
+    PNG_LORE       = path.join(PNG_LIBRARY, 'lore');
+
+    BLANK_PERK     = path.join(PNG_PERKS_BASE, 'blank.png');
+    BLANK_ITEM     = path.join(PNG_ITEMS, 'blank.png');
+    BLANK_ADDON    = path.join(PNG_ADDONS, 'blank.png');
+    BLANK_OFFERING = path.join(PNG_OFFERINGS, 'blank.png');
+
+    // Both caches below are keyed to the old root's filesystem, so a caller that
+    // switches roots between runs must not keep reading them.
+    loreDirEntries = null;
+    warnedMissingLore.clear();
+}
 
 // ---------------------------------------------------------------------------
 // Layout constants
@@ -110,16 +216,14 @@ const VIOL_MARKER   = 20;  // px, the little red square marking each violation l
 const VIOL_MARKER_GAP = 12; // gap between the marker and the violation text
 
 // ---------------------------------------------------------------------------
-// Data loading
+// Game data
 // ---------------------------------------------------------------------------
-const allPerks       = JSON.parse(fs.readFileSync(PERKS_FILE, 'utf8'));
-const allKillers      = JSON.parse(fs.readFileSync(KILLERS_FILE, 'utf8'));
-const allAddonEntries = JSON.parse(fs.readFileSync(ADDONS_FILE, 'utf8'));
-const itemsData       = JSON.parse(fs.readFileSync(ITEMS_FILE, 'utf8'));
-const offeringsData   = JSON.parse(fs.readFileSync(OFFERINGS_FILE, 'utf8'));
-
-const ITEM_TYPES    = itemsData.ItemTypes;  // [{ Name, Addons:[{id,Name,icon,Rarity}] }]
-const ITEM_VARIANTS = itemsData.Items;      // [{ id, Name, Type, icon, Rarity }]
+// Filled in by loadGameData(), which lives further down next to the lookup
+// builders it depends on. Declared up here so the validation and layout code
+// below reads exactly the names it always did.
+let allPerks, allKillers, allAddonEntries, itemsData, offeringsData;
+let ITEM_TYPES;     // [{ Name, Addons:[{id,Name,icon,Rarity}] }]
+let ITEM_VARIANTS;  // [{ id, Name, Type, icon, Rarity }]
 
 // ---------------------------------------------------------------------------
 // Name normalisation helpers
@@ -203,31 +307,89 @@ function buildOfferingLookup(list) {
 // ---------------------------------------------------------------------------
 // Lookups
 // ---------------------------------------------------------------------------
-const killerLookup = buildKillerLookup(allKillers);
+// All derived from the game data above, and so rebuilt whenever the asset root
+// changes. Same names, same contents as when they were module-load constants.
+let killerLookup;
+let survivorPerksArr, killerPerksArr;
+let survivorPerkLookup, killerPerkLookup;
+let addonsByKiller;
+let typeByName, variantByName;
+let survivorOfferingLookup, killerOfferingLookup;
 
-const survivorPerksArr = allPerks.filter(p => p.survivorPerk === true);
-const killerPerksArr   = allPerks.filter(p => p.survivorPerk === false);
-const survivorPerkLookup = buildPerkLookup(survivorPerksArr);
-const killerPerkLookup   = buildPerkLookup(killerPerksArr);
+/**
+ * Read one game-data JSON, naming the file in the error rather than surfacing a
+ * bare ENOENT — with the asset root now a caller-supplied pointer, a wrong root
+ * is the likeliest cause of a failure here.
+ */
+function readGameJson(file) {
+    let raw;
+    try {
+        raw = fs.readFileSync(file, 'utf8');
+    } catch (e) {
+        fatal(`Cannot read game data "${file}": ${e.message}`);
+    }
+    try {
+        return JSON.parse(raw);
+    } catch (e) {
+        fatal(`Malformed game data "${file}": ${e.message}`);
+    }
+}
 
-// Killer power add-ons: Map normalized killer Name -> that killer's Addons[]
-// (add-on names are not globally unique across killers, so this must stay
-// per-killer; never build the icon path from the killer slug either — see
-// addonIconPng below).
-const addonsByKiller = new Map();
-for (const k of allAddonEntries) addonsByKiller.set(normalize(k.Name), k.Addons || []);
+/** Load every game-data file under the current REPO_ROOT and rebuild the lookups. */
+function loadGameData() {
+    allPerks        = readGameJson(PERKS_FILE);
+    allKillers      = readGameJson(KILLERS_FILE);
+    allAddonEntries = readGameJson(ADDONS_FILE);
+    itemsData       = readGameJson(ITEMS_FILE);
+    offeringsData   = readGameJson(OFFERINGS_FILE);
 
-// Item types + variants. Items.json `Items[]` are VARIANTS (only these are
-// acceptable as a row's `item:`); `ItemTypes[].Addons[]` are the per-type add-on
-// pools a row's `addons:` must resolve within.
-const typeByName    = new Map(ITEM_TYPES.map(t => [normalize(t.Name), t]));
-const variantByName = buildNameLookup(ITEM_VARIANTS);
+    ITEM_TYPES    = itemsData.ItemTypes;
+    ITEM_VARIANTS = itemsData.Items;
 
-// Offerings are side-aware and MUST be indexed per side — 8 names (four
-// Blueprints, four Reagents) appear on both sides with the SAME numeric `id`, so
-// merging the arrays or keying by id alone would silently cross-wire them.
-const survivorOfferingLookup = buildOfferingLookup(offeringsData.Survivor);
-const killerOfferingLookup   = buildOfferingLookup(offeringsData.Killer);
+    killerLookup = buildKillerLookup(allKillers);
+
+    survivorPerksArr = allPerks.filter(p => p.survivorPerk === true);
+    killerPerksArr   = allPerks.filter(p => p.survivorPerk === false);
+    survivorPerkLookup = buildPerkLookup(survivorPerksArr);
+    killerPerkLookup   = buildPerkLookup(killerPerksArr);
+
+    // Killer power add-ons: Map normalized killer Name -> that killer's Addons[]
+    // (add-on names are not globally unique across killers, so this must stay
+    // per-killer; never build the icon path from the killer slug either — see
+    // addonIconPng below).
+    addonsByKiller = new Map();
+    for (const k of allAddonEntries) addonsByKiller.set(normalize(k.Name), k.Addons || []);
+
+    // Item types + variants. Items.json `Items[]` are VARIANTS (only these are
+    // acceptable as a row's `item:`); `ItemTypes[].Addons[]` are the per-type add-on
+    // pools a row's `addons:` must resolve within.
+    typeByName    = new Map(ITEM_TYPES.map(t => [normalize(t.Name), t]));
+    variantByName = buildNameLookup(ITEM_VARIANTS);
+
+    // Offerings are side-aware and MUST be indexed per side — 8 names (four
+    // Blueprints, four Reagents) appear on both sides with the SAME numeric `id`, so
+    // merging the arrays or keying by id alone would silently cross-wire them.
+    survivorOfferingLookup = buildOfferingLookup(offeringsData.Survivor);
+    killerOfferingLookup   = buildOfferingLookup(offeringsData.Killer);
+}
+
+/**
+ * Resolve the asset root and load its game data, ready for a run. Memoised on the
+ * resolved root: a batch — or a host process that keeps this module loaded and
+ * renders many sheets — parses the JSON once, while a caller that switches roots
+ * between runs gets a clean reload rather than the previous checkout's data.
+ *
+ * Every entry point (runCli, generateBuildSheets, loadBuildFile) calls this first.
+ */
+let initializedRoot = null;
+function initialize(assetRoot) {
+    const root = resolveAssetRoot(assetRoot);
+    if (root === initializedRoot) return root;
+    setAssetRoot(root);
+    loadGameData();
+    initializedRoot = root;
+    return root;
+}
 
 // ---------------------------------------------------------------------------
 // --rules: allow-list resolution
@@ -736,9 +898,11 @@ function loadRulesContext(rulesPath) {
 function parseArgs(argv) {
     const args = {
         files: [],
+        assetRoot: null,
         outDir: null,
         rulesPath: null,
         iconsOnly: false,
+        help: false,
     };
     let i = 0;
     while (i < argv.length) {
@@ -747,17 +911,17 @@ function parseArgs(argv) {
             args.outDir = argv[++i];
         } else if (a === '--rules' && argv[i + 1]) {
             // Path to an allow-list YAML; validated against every rendered build
-            // by loadRulesContext() / validateModel() (see main()).
+            // by loadRulesContext() / validateModel() (see generateBuildSheets()).
             args.rulesPath = argv[++i];
         } else if (a === '--asset-root' && argv[i + 1]) {
-            // Swallow the flag + its value: --asset-root is read by readOption()
-            // at module load, ABOVE, before parseArgs ever runs (needed because
-            // REPO_ROOT / the JSON data loads must happen at require time). This
-            // branch's only job is to keep it out of args.files — without it,
-            // "--asset-root" and its path would be treated as positional input
-            // files. Copied verbatim from perk-sheet-generator.js:175-176; do not
-            // turn this into a real option.
-            i++;
+            // A real option, unlike in the three sibling generators: they peek at
+            // process.argv with a readOption() call above their path constants,
+            // because their roots are baked in at module load. This tool resolves
+            // its root per run (see initialize()), so the value simply rides along
+            // in args and there is nothing left to swallow.
+            args.assetRoot = argv[++i];
+        } else if (a === '--help' || a === '-h') {
+            args.help = true;
         } else if (a === '--icons-only') {
             // Boolean flag: unlike the others above, this does not consume a value.
             args.iconsOnly = true;
@@ -774,9 +938,15 @@ function parseArgs(argv) {
 // ---------------------------------------------------------------------------
 // Error helpers
 // ---------------------------------------------------------------------------
+/**
+ * Every user-facing error funnels through here. It throws instead of exiting so
+ * this module is safe to require from another project — a library must not kill
+ * its host process. runCli() turns the BuildSheetError back into the very same
+ * `ERROR: <msg>` on stderr and exit code 1 this used to print itself, and control
+ * flow is unchanged for the 69 call sites: fatal() still never returns.
+ */
 function fatal(msg) {
-    console.error(`ERROR: ${msg}`);
-    process.exit(1);
+    throw new BuildSheetError(msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -1790,78 +1960,190 @@ async function renderIconSheet(model, outDir) {
 }
 
 // ---------------------------------------------------------------------------
-// Main processing
+// Public API
 // ---------------------------------------------------------------------------
-async function main() {
-    const args = parseArgs(process.argv.slice(2));
+// This file is both the CLI and an importable module. Everything above resolves
+// its assets through initialize() rather than at module load, so requiring it
+// costs nothing and touches no filesystem — see the asset-root block at the top.
 
-    if (args.files.length === 0) {
-        console.log(
-            'Usage: node build-sheet-generator.js <file.yaml...>\n' +
-            '       [--asset-root <dir>] [--out <dir>] [--rules <file.yaml>] [--icons-only]'
-        );
-        process.exit(0);
+/**
+ * Render every build file in `files` and return one result per file.
+ *
+ * @param {object}   options
+ * @param {string[]} options.files       Paths to build YAMLs (killer or survivor).
+ * @param {string}   [options.assetRoot] balancing-tool checkout to read icons and
+ *                                       game data from. Defaults to
+ *                                       $DBD_BALANCING_TOOL_ROOT, then a search
+ *                                       upwards from this file and the cwd.
+ * @param {string}   [options.outDir]    Output directory; default is next to each
+ *                                       input file.
+ * @param {string}   [options.rulesPath] Allow-list YAML to validate the builds
+ *                                       against.
+ * @param {boolean}  [options.iconsOnly] Also write the text-free, transparent
+ *                                       icon-strip variant of each sheet.
+ * @param {function} [options.onResult]  Called with each result as that file
+ *                                       finishes, for progress reporting.
+ * @returns {Promise<Array<{file: string, side: string, rows: number,
+ *                          sheetPath: string, iconsPath: ?string,
+ *                          violations: ?Array, model: object}>>}
+ * @throws {BuildSheetError} on any authoring error — an unknown perk, a bad asset
+ *   root, a rules file for the wrong killer. Violations are NOT errors: they come
+ *   back in `violations`, exactly as the CLI renders them and still exits 0.
+ */
+async function generateBuildSheets(options = {}) {
+    const {
+        files = [],
+        assetRoot = null,
+        outDir = null,
+        rulesPath = null,
+        iconsOnly = false,
+        onResult = null,
+    } = options;
+
+    if (!Array.isArray(files) || files.length === 0) {
+        fatal('No build files given: pass at least one YAML path in `files`.');
     }
+
+    initialize(assetRoot);
 
     // Parsed once and reused across every input file — perks/items/killer-addon
     // pools don't depend on which build file is being checked.
-    const rulesCtx = args.rulesPath ? loadRulesContext(args.rulesPath) : null;
+    const rulesCtx = rulesPath ? loadRulesContext(rulesPath) : null;
 
-    const outDirOverride = args.outDir ? path.resolve(args.outDir) : null;
+    const outDirOverride = outDir ? path.resolve(outDir) : null;
 
     // Stamp the generation time once so a batch shares a consistent timestamp.
     // Full "YYYY-MM-DD HH:MM:SS" stamp, matching the sample's own Image Date
     // line (canvasGenerator.js:671) — not just the date.
-    const generatedAt = new Date();
-    const generatedISO = generatedAt.toISOString();
-    const dateStamp = generatedISO.replace('T', ' ').replace(/\..+/, '');
+    const dateStamp = new Date().toISOString().replace('T', ' ').replace(/\..+/, '');
 
-    for (const filePath of args.files) {
+    const results = [];
+    for (const filePath of files) {
         const absPath = path.resolve(filePath);
         const model = processFile(absPath);
 
-        // A violation is a finding to render, not a CLI error: validateModel()
-        // only fatal()s on a killer/rules-file mismatch (a real authoring
-        // error), never on the violations themselves — those just populate
-        // model.violations for renderSheet/renderIconSheet to outline, and the
-        // process exits 0 either way.
+        // A violation is a finding to render, not an error: validateModel() only
+        // fatal()s on a killer/rules-file mismatch (a real authoring error), never
+        // on the violations themselves — those just populate model.violations for
+        // renderSheet/renderIconSheet to outline, and a CLI run still exits 0.
         if (rulesCtx) {
-            model.rulesPath = args.rulesPath;
+            model.rulesPath = rulesPath;
             model.violations = validateModel(model, rulesCtx);
         } else {
             model.violations = null;
         }
 
-        const outDir = outDirOverride || path.dirname(absPath);
-        fs.mkdirSync(outDir, { recursive: true });
+        const dir = outDirOverride || path.dirname(absPath);
+        fs.mkdirSync(dir, { recursive: true });
 
-        const outFile = await renderSheet(model, outDir, dateStamp);
+        const result = {
+            file: absPath,
+            side: model.isSurvivorSheet ? 'survivor' : 'killer',
+            rows: model.rows.length,
+            sheetPath: await renderSheet(model, dir, dateStamp),
+            iconsPath: null,
+            violations: model.violations,
+            model,
+        };
+        if (iconsOnly) result.iconsPath = await renderIconSheet(model, dir);
 
-        let summary =
-            `[${path.basename(absPath)}]\n` +
-            `  Side  : ${model.isSurvivorSheet ? 'survivor' : 'killer'}\n` +
-            `  Rows  : ${model.rows.length}\n` +
-            `  Sheet → ${outFile}`;
-
-        if (args.iconsOnly) {
-            const iconsOut = await renderIconSheet(model, outDir);
-            summary += `\n  Icons → ${iconsOut}`;
-        }
-
-        if (rulesCtx) {
-            if (model.violations.length) {
-                summary += `\n  Violations (${model.violations.length}):`;
-                for (const v of model.violations) summary += `\n    - ${v.text}`;
-            } else {
-                summary += `\n  Violations : none`;
-            }
-        }
-
-        console.log(summary);
+        results.push(result);
+        // Reported as each file finishes rather than in one batch at the end, so
+        // the CLI still streams its per-file summary the way it always has.
+        if (onResult) onResult(result);
     }
+
+    return results;
 }
 
-main().catch(err => {
-    console.error('Fatal error:', err);
-    process.exit(1);
-});
+/**
+ * Parse and validate one build YAML into its model WITHOUT rendering anything —
+ * for a caller that wants the resolved perks/items/add-ons, or just the --rules
+ * violations, without paying for a canvas. Throws BuildSheetError on an authoring
+ * error, exactly as generateBuildSheets would.
+ */
+function loadBuildFile(filePath, options = {}) {
+    const { assetRoot = null, rulesPath = null } = options;
+
+    initialize(assetRoot);
+
+    const model = processFile(path.resolve(filePath));
+    if (rulesPath) {
+        model.rulesPath = rulesPath;
+        model.violations = validateModel(model, loadRulesContext(rulesPath));
+    } else {
+        model.violations = null;
+    }
+    return model;
+}
+
+// ---------------------------------------------------------------------------
+// CLI
+// ---------------------------------------------------------------------------
+const USAGE =
+    'Usage: dbd-build-sheet <file.yaml...>\n' +
+    '       [--asset-root <dir>]  balancing-tool checkout the assets are read from\n' +
+    '                             (default: $DBD_BALANCING_TOOL_ROOT, else searched\n' +
+    '                             for upwards from this script and the working dir)\n' +
+    '       [--out <dir>]         output directory (default: next to each input file)\n' +
+    '       [--rules <file.yaml>] validate the builds against an allow-list YAML\n' +
+    '       [--icons-only]        also write a text-free, transparent icon-strip PNG';
+
+/** The per-file stdout block. `violations` is null unless --rules was passed. */
+function formatResult(result) {
+    let summary =
+        `[${path.basename(result.file)}]\n` +
+        `  Side  : ${result.side}\n` +
+        `  Rows  : ${result.rows}\n` +
+        `  Sheet → ${result.sheetPath}`;
+
+    if (result.iconsPath) summary += `\n  Icons → ${result.iconsPath}`;
+
+    if (Array.isArray(result.violations)) {
+        if (result.violations.length) {
+            summary += `\n  Violations (${result.violations.length}):`;
+            for (const v of result.violations) summary += `\n    - ${v.text}`;
+        } else {
+            summary += `\n  Violations : none`;
+        }
+    }
+    return summary;
+}
+
+async function runCli(argv = process.argv.slice(2)) {
+    const args = parseArgs(argv);
+
+    if (args.help || args.files.length === 0) {
+        console.log(USAGE);
+        return;
+    }
+
+    await generateBuildSheets({
+        files: args.files,
+        assetRoot: args.assetRoot,
+        outDir: args.outDir,
+        rulesPath: args.rulesPath,
+        iconsOnly: args.iconsOnly,
+        onResult: result => console.log(formatResult(result)),
+    });
+}
+
+module.exports = {
+    generateBuildSheets,
+    loadBuildFile,
+    resolveAssetRoot,
+    runCli,
+    BuildSheetError,
+};
+
+// Only run the CLI when this file IS the program. Required as a module, it just
+// hands back the exports above and does nothing else.
+if (require.main === module) {
+    runCli().catch(err => {
+        // An authoring error prints as the plain one-liner it always did; anything
+        // else is a bug in this tool and gets its stack.
+        if (err instanceof BuildSheetError) console.error(`ERROR: ${err.message}`);
+        else console.error('Fatal error:', err);
+        process.exit(1);
+    });
+}

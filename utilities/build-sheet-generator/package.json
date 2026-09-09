@@ -1,10 +1,29 @@
 {
   "name": "dbd-build-sheet-generator",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
-  "description": "CLI for generating Dead by Daylight build sheet PNGs (specific loadouts, not allow-lists) from YAML.",
+  "description": "CLI and library for generating Dead by Daylight build sheet PNGs (specific loadouts, not allow-lists) from YAML.",
+  "keywords": [
+    "deadbydaylight",
+    "dbd",
+    "build-sheet"
+  ],
+  "license": "ISC",
+  "main": "build-sheet-generator.js",
+  "exports": {
+    ".": "./build-sheet-generator.js",
+    "./package.json": "./package.json"
+  },
   "bin": {
     "dbd-build-sheet": "./build-sheet-generator.js"
+  },
+  "files": [
+    "build-sheet-generator.js",
+    "README.md",
+    "examples/*.yaml"
+  ],
+  "engines": {
+    "node": ">=18.12.0"
   },
   "dependencies": {
     "canvas": "^3.2.3",
