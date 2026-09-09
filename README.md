@@ -1,42 +1,68 @@
 ![Balanced by Daylight Logo](public/iconography/Logo-Background.webp)
-# Balanced by Daylight
-### This is a tool designed to assist competitive Dead by Daylight players in making balancing for tournament leagues, and making sure team builds remain compliant to said balancing.
+# Balanced by Daylight — Sheet Generation Fork
 
-This tool is in very early stages, but I decided to make the repository public nonetheless.
+This repository is a **fork of the public [Balanced by Daylight](https://github.com/kylestarrtech/DBD-Balance-Checker) project** (a.k.a. DBD Balance Checker). Upstream is a hosted Node/Express web app for building Dead by Daylight loadouts and validating them against tournament-league balancing rulesets.
 
-## Features
+**This fork is used for a single purpose: generating rendered image files.** It produces "allowed perk / add-on / item" **sheets** (PNGs) for competitive DBD tournament balancing, plus optional balancing-preset JSON. It is **not** run as a hosted service. We simply borrow the upstream project's public game assets — icons, portraits, JSON data, and the `canvas-image-library/` PNG mirrors — as rendering inputs for these image tools.
 
-| Feature | Complete |
-| -------- | -------- |
-| Survivor Builds | ✅ (Fully complete!)|
-| Killer Builds | ✅ (Fully complete!) |
-| Survivor Items+Addons | ✅ (Fully complete!) |
-| Offerings | ✅ (Fully complete!) |
+## What this repo is for
 
-## Discord Server
+Three standalone CLI **sheet generators** under `utilities/`. Each reads a per-killer YAML allow-list and renders a PNG sheet (and can optionally compile an aggregated Balanced-by-Daylight balancing-preset JSON):
 
-If you'd like to chat, give feedback, see updates, or more - the [Discord Server](https://discord.gg/E6zfpwvCce) has all of that information!
+| Tool | Directory | Input | Output |
+| ---- | --------- | ----- | ------ |
+| Perk Sheet Generator | [`utilities/perk-sheet-generator/`](utilities/perk-sheet-generator/README.md) | Killer's allowed perks (YAML) | `<killer>-killer-perks.png`, `<killer>-survivor-perks.png` |
+| Add-on Sheet Generator | [`utilities/addon-sheet-generator/`](utilities/addon-sheet-generator/README.md) | Killer's allowed power add-ons (YAML) | `<killer>-killer-addons.png` |
+| Item Sheet Generator | [`utilities/item-sheet-generator/`](utilities/item-sheet-generator/README.md) | Killer's allowed survivor items + add-ons (YAML) | `<killer>-items.png` |
 
-## Reporting Issues
+Each tool has its own detailed `README.md` covering the YAML schema, selectors, limits, and preset compilation — linked in the table above.
 
-Spot an issue? Feel free to create a new Issue in the [Issues](https://github.com/kylestarrtech/DBD-Balance-Checker/issues) section of the GitHub! Another option if you'd like to contribute is to fork the codebase and try to patch it!
+The rendered PNGs are composited with [node-canvas](https://github.com/Automattic/node-canvas), which cannot read WebP. The live site's assets are `.webp` under `public/`, so the generators read from **`canvas-image-library/`** — a parallel PNG mirror of those assets (see `canvas-image-library/README.md`).
 
-## Installation
+## Usage
 
-Installing and running this codebase is quite easy. A Node.js version of 18 or above is recommended, but I'm confident older versions will work just fine (18 just happens to be the version I'm using for this).
+A Node.js version of 18 or above is recommended.
 
-Here are the steps:
-1. You must have Node.js installed and ready for this. You can do that by following this guide [here](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm).
-2. Clone the GitHub repository through your method of choice (CLI, GUI, .etc).
-3. Use the command in your terminal `npm i` to install all of the node packages required.
-4. The server will likely complain if you try to launch via `node server.js` that there are non-existant environment variables. This is due to the autobalancer requiring a .env file, which essentially stores key-value pairs of data meant to be accessible by the entire codebase. This file is kept secure outside of the public codebase for security reasons. As a result, **the server has to be run without the Autobalancer**.
-    * To run the server without the Autobalancer, the `--disable-autobalance` argument may be used at launch. This will generate a default balance preset to be used on the Balance Checker.
-5. If you have autobalancer access, use `node server.js` to launch the server. Otherwise (basically everyone) should use `node server.js --disable-autobalance`.
-5. The server is now running! You should be able to connect to `http://localhost:3000/` on any browser you have running and see the project active!
+```bash
+# From the repo root:
+npm i            # installs native build deps (canvas, sharp) — needs build tools
+npm i js-yaml    # one-time install used by the sheet generators
+```
 
-### Issues?
+Then run whichever generator you need, pointing it at a killer allow-list YAML. Each tool ships an example under its own `examples/` directory:
 
-If you have any issues, feel free to see the **Contact** section below and contact me if you've followed the steps above to a tee!
+```bash
+# Perk sheets (killer-side + survivor-side)
+node utilities/perk-sheet-generator/perk-sheet-generator.js \
+     utilities/perk-sheet-generator/examples/the-trapper.yaml \
+     --out utilities/perk-sheet-generator/output \
+     --preset utilities/perk-sheet-generator/output/test-preset.json
 
-## Contact
-For more information, DM/follow me on [Twitter](https://twitter.com/SHADERSOP) or message me on Discord (shaders) for more information.
+# Add-on sheet (killer power add-ons, grouped by rarity)
+node utilities/addon-sheet-generator/addon-sheet-generator.js \
+     utilities/addon-sheet-generator/examples/the-trapper.yaml \
+     --out utilities/addon-sheet-generator/output
+
+# Item sheet (allowed survivor items + their add-ons)
+node utilities/item-sheet-generator/item-sheet-generator.js \
+     utilities/item-sheet-generator/examples/the-trapper.yaml \
+     --out utilities/item-sheet-generator/output
+```
+
+Common flags: `--out <dir>` (output directory), `--preset <path>` (also compile a BbD preset JSON), `--name "<name>"` (preset `Name` field). See each tool's README for the full flag list.
+
+## Relationship to the upstream web app
+
+This repo still contains the full upstream codebase, but for our purposes it is **inherited code we don't run**: the Express server (`server.js`), the autobalancer, the OCR image-extractor, and the multiplayer machinery are all part of the original hosted web app, not the sheet-generation workflow.
+
+If you actually want the Balanced by Daylight **web app** (build creator, live balance checker, share-as-image), use the [original repository](https://github.com/kylestarrtech/DBD-Balance-Checker) instead.
+
+## Credit
+
+The original Balanced by Daylight project — and the game-asset library this fork borrows — is by **Kyle Starr (shaders)**. For the upstream project, its community, and updates:
+
+- Original repository: <https://github.com/kylestarrtech/DBD-Balance-Checker>
+- Discord Server: <https://discord.gg/E6zfpwvCce>
+- Twitter: [@SHADERSOP](https://twitter.com/SHADERSOP) · Discord: `shaders`
+
+All Dead by Daylight assets are property of Behaviour Interactive.
