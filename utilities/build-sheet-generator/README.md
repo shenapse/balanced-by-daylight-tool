@@ -10,6 +10,10 @@ tournament organiser publishing the builds from a match, or a player registering
 shares no module with its siblings (each tool in this fork duplicates its own preamble) and has
 no `--preset` compilation step — a concrete build has no allow-list to compile.
 
+It is also the only one of the four that is usable **outside this repo** — as an
+installed CLI or as a required module. See [Using it from another
+project](#using-it-from-another-project).
+
 ## Quick start
 
 ```bash
@@ -27,17 +31,101 @@ node utilities/build-sheet-generator/build-sheet-generator.js \
 
 ```
 node utilities/build-sheet-generator/build-sheet-generator.js <file.yaml...>
-     [--asset-root <dir>]  Repo root used to resolve canvas-image-library/ assets
-                           (default: DBD_BALANCING_TOOL_ROOT env var, else auto-detected)
+     [--asset-root <dir>]  Checkout used to resolve canvas-image-library/ assets and
+                           public/*.json game data (default: DBD_BALANCING_TOOL_ROOT
+                           env var, else searched for upwards from the script and cwd)
      [--out <dir>]         Output directory (default: next to each input file)
      [--rules <file.yaml>] Validate the builds against an allow-list YAML
      [--icons-only]        Also write a text-free, transparent icon-strip PNG
+     [--help | -h]         Print this usage and exit 0
 ```
+
+Installed as a package (below), the same CLI is on `PATH` as `dbd-build-sheet`.
 
 There is deliberately no `--preset` or `--name`: those compile an allow-list preset, and a
 concrete-build sheet has no allow-list to contribute — it is a report of what was picked, not a
 policy. There is no `--columns` either: row width is fixed by the slot layout (4 perks + offering
 + optional item + 2 add-ons), it does not wrap.
+
+## Using it from another project
+
+The tool is a self-contained npm package (`dbd-build-sheet-generator`): its only
+dependencies are `canvas` and `js-yaml`, and it shares no module with the rest of the
+repo. What it cannot carry with it is the artwork — `canvas-image-library/` alone is
+~155 MB — so an outside caller supplies a **checkout to read assets from**, and gets a
+CLI and a library that work anywhere.
+
+### Install
+
+```bash
+# Into another project (npm resolves the path; it is not published to any registry)
+npm i /path/to/balancing-tool/utilities/build-sheet-generator
+
+# Or put the `dbd-build-sheet` command on PATH globally
+cd /path/to/balancing-tool/utilities/build-sheet-generator && npm link
+```
+
+The package is marked `private`, which blocks `npm publish` but not either of the
+installs above. Publishing it to a registry would mean shipping a CLI that is useless
+without a 155 MB checkout it can't declare as a dependency — drop `"private": true`
+from `package.json` if you want to anyway.
+
+### Point it at the assets
+
+Every invocation needs a balancing-tool checkout. In precedence order:
+
+1. `--asset-root <dir>`, or the `assetRoot` option in the API.
+2. The `DBD_BALANCING_TOOL_ROOT` environment variable — usually the right choice for an
+   installed CLI, set once in the shell profile or the CI environment.
+3. Otherwise the tool searches upwards from its own file and from the working directory
+   for a directory containing both `public/Killers.json` and `canvas-image-library/`.
+   That finds the repo when the tool runs from inside a checkout (including its
+   in-repo home) and finds nothing — rather than guessing — when it doesn't.
+
+```bash
+export DBD_BALANCING_TOOL_ROOT=/path/to/balancing-tool
+dbd-build-sheet ./finals-killer.yaml --out ./sheets --rules ./league-rules.yaml
+```
+
+### Library API
+
+```js
+const { generateBuildSheets, loadBuildFile, BuildSheetError } =
+    require('dbd-build-sheet-generator');
+
+const results = await generateBuildSheets({
+    files: ['./finals-killer.yaml', './finals-survivors.yaml'],
+    assetRoot: '/path/to/balancing-tool',   // optional; see precedence above
+    outDir: './sheets',                     // optional; default is next to each input
+    rulesPath: './league-rules.yaml',       // optional
+    iconsOnly: true,                        // optional; also write the icon strip
+    onResult: r => console.log(`${r.side} sheet done`),   // optional progress hook
+});
+
+for (const r of results) {
+    // { file, side: 'killer'|'survivor', rows, sheetPath, iconsPath, violations, model }
+    console.log(r.sheetPath, r.violations.length, 'violations');
+}
+```
+
+- **`generateBuildSheets(options)` → `Promise<results[]>`** — the CLI's whole job. One
+  result per input file, in order, each reported to `onResult` as it finishes.
+- **`loadBuildFile(path, { assetRoot, rulesPath })` → `model`** — parse, resolve and
+  validate one file **without rendering**, for a caller that only wants the resolved
+  loadout or the violations and doesn't want to pay for a canvas.
+- **`resolveAssetRoot(explicit)` → `string`** — run the precedence above and return the
+  root, or throw. Useful for failing fast at your own startup.
+- **`runCli(argv)`** — the CLI entry point, if you want to wrap it rather than the API.
+
+Requiring the module reads nothing from disk; the asset root is resolved and the game
+data parsed on the first call, then reused across calls that keep the same root.
+
+**Errors throw, they don't exit.** Every authoring error — an unknown perk, a
+wrong-side perk, a duplicate, a bad asset root, a rules file for the wrong killer —
+throws a `BuildSheetError` whose `message` is the same text the CLI prints after
+`ERROR: `. Nothing in the library calls `process.exit`. **Violations are not errors:**
+they come back in `result.violations` (and `model.violations`), exactly as the CLI
+renders them and still exits 0.
 
 ## YAML schema
 
@@ -205,9 +293,13 @@ Like its siblings, this tool reads from the repo's `canvas-image-library/` PNG m
 - Empty slots: `canvas-image-library/{Perks,Items,Addons,Offerings}/blank.png`
   (`Addons/blank.png` is shared by killer power add-ons and item add-ons alike)
 
-`--asset-root <dir>` overrides the repo root these are resolved against (default: the
-`DBD_BALANCING_TOOL_ROOT` env var, else auto-detected as two levels up from this script). It is
-read once at module load — before the game-data JSON files are loaded — so a JSON load failure
-can be traced back to a bad `--asset-root`. Missing individual icons fall back to the grey
-`#333333` placeholder box on the regular sheet (never on the `--icons-only` variant) rather than
-crashing the run.
+`--asset-root <dir>` sets the checkout all of the above resolve against; see [Point it at the
+assets](#point-it-at-the-assets) for the full precedence. An explicit root that doesn't contain
+both `public/Killers.json` and `canvas-image-library/` is reported as an error rather than
+falling through to the search, so a typo can't quietly render from some other checkout that
+happens to sit above the working directory.
+
+The root is resolved, and the game-data JSON parsed, once per run rather than at module load —
+that is what lets the module be required and aimed at an arbitrary checkout. Missing individual
+icons still fall back to the grey `#333333` placeholder box on the regular sheet (never on the
+`--icons-only` variant) rather than crashing the run.

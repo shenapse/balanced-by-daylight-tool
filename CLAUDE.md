@@ -64,7 +64,7 @@ Standalone scripts run directly, not part of the server. Node tools: `node <scri
 - `utilities/{killers,addon,map}-format-converter` — convert legacy `Old*`/`Legacy*` JSON to the `New*` formats the app consumes.
 - `utilities/{hue-shift-tool,image-crop-tool,image-resizer}` — batch image processing (sharp / node-canvas).
 - `utilities/autobalancer/autobalancer-dbdl.js` — league-specific balance-format converter (uses `natural`/Jaro-Winkler fuzzy name matching). Currently commented out in `autobalancer.js`.
-- `utilities/build-sheet-generator` — renders PNG sheets of specific killer/survivor builds actually played (not allow-lists), with an optional `--rules` check against an allow-list YAML.
+- `utilities/build-sheet-generator` — renders PNG sheets of specific killer/survivor builds actually played (not allow-lists), with an optional `--rules` check against an allow-list YAML. Unlike the other tools it is also a **standalone npm package** usable outside this repo (`npm i ./utilities/build-sheet-generator`, bin `dbd-build-sheet`, or `require('dbd-build-sheet-generator')`): it resolves its asset root and loads game data per run rather than at module load, `fatal()` throws a `BuildSheetError` instead of calling `process.exit`, and the CLI only runs under `require.main === module`. The artwork is never bundled — an outside caller points it at a checkout with `--asset-root`, the `assetRoot` option, or `DBD_BALANCING_TOOL_ROOT`.
 - `png_to_webp/`, `webp_to_png/` (Pillow), `name_conversion/` — asset filename/format normalization helpers.
 
 ## Conventions

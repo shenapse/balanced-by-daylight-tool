@@ -60,6 +60,23 @@ node utilities/build-sheet-generator/build-sheet-generator.js \
 
 Common flags: `--out <dir>` (output directory), `--asset-root <dir>` (repo root used to resolve assets), `--icons-only` (also write a text-free, transparent variant). The three allow-list tools additionally take `--preset <path>` (also compile a BbD preset JSON) and `--name "<name>"` (preset `Name` field); the Build Sheet Generator has neither, and takes `--rules <path>` instead. See each tool's README for the full flag list.
 
+### Using the Build Sheet Generator outside this repo
+
+The Build Sheet Generator is also packaged for use from another project, as an installed CLI or as a required module — the other three still run in place, from the repo root:
+
+```bash
+npm i /path/to/balancing-tool/utilities/build-sheet-generator   # or: npm link
+export DBD_BALANCING_TOOL_ROOT=/path/to/balancing-tool          # where it reads assets from
+dbd-build-sheet ./finals-killer.yaml --out ./sheets
+```
+
+```js
+const { generateBuildSheets } = require('dbd-build-sheet-generator');
+await generateBuildSheets({ files: ['./finals-killer.yaml'], outDir: './sheets' });
+```
+
+The artwork is not bundled (`canvas-image-library/` alone is ~155 MB), so an outside caller always points the tool at a checkout — via `--asset-root`, the `assetRoot` option, or `DBD_BALANCING_TOOL_ROOT`. See [the tool's README](utilities/build-sheet-generator/README.md#using-it-from-another-project) for the full API.
+
 ## Relationship to the upstream web app
 
 This repo still contains the full upstream codebase, but for our purposes it is **inherited code we don't run**: the Express server (`server.js`), the autobalancer, the OCR image-extractor, and the multiplayer machinery are all part of the original hosted web app, not the sheet-generation workflow.
