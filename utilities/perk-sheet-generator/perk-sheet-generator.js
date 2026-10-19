@@ -165,6 +165,7 @@ function parseArgs(argv) {
         presetPath: null,
         presetName: 'Generated Allow-List',
         iconsOnly: false,
+        universesDir: null,
     };
     let i = 0;
     while (i < argv.length) {
@@ -181,6 +182,8 @@ function parseArgs(argv) {
             args.presetName = argv[++i];
         } else if (a === '--asset-root' && argv[i + 1]) {
             i++;
+        } else if (a === '--universes-dir' && argv[i + 1]) {
+            args.universesDir = argv[++i];
         } else if (a === '--icons-only') {
             // Boolean flag: unlike the others above, this does not consume a value.
             args.iconsOnly = true;
@@ -213,10 +216,20 @@ function fatal(msg) {
  * @param {Map} lookup - normalized-name -> perk for this side
  * @param {string} filePath - for error messages
  */
-function matchSelector(selector, universe, lookup, filePath) {
+// sideLookup (optional): lookup over ALL perks of the side, passed only when the universe
+// is narrowed, so a real perk outside the universe gets its own error.
+function outsideUniverse(name, filePath) {
+    fatal(
+        `Perk "${name}" in file "${filePath}" is not in this build's perk universe. ` +
+        `Add it to the universe or remove it from allow/deny.`
+    );
+}
+
+function matchSelector(selector, universe, lookup, filePath, sideLookup) {
     if (typeof selector === 'string') {
         const norm = normalize(selector);
         const perk = lookup.get(norm);
+        if (!perk && sideLookup && sideLookup.has(norm)) outsideUniverse(selector, filePath);
         if (!perk) {
             fatal(
                 `Unknown perk name "${selector}" in file "${filePath}". ` +
@@ -249,6 +262,7 @@ function matchSelector(selector, universe, lookup, filePath) {
             if (perk) {
                 return [perk];
             }
+            if (sideLookup && sideLookup.has(norm)) outsideUniverse(reconstructed, filePath);
             fatal(
                 `Unknown perk name "${reconstructed}" in file "${filePath}". ` +
                 `No matching perk found on this side. ` +
@@ -265,12 +279,182 @@ function matchSelector(selector, universe, lookup, filePath) {
 }
 
 // ---------------------------------------------------------------------------
+// Universe files (named, shared perk pools)
+// ---------------------------------------------------------------------------
+// `universe:` in a build YAML may name a universe file <universes-dir>/<id>.yaml
+// instead of inlining a perk list. resolveUniverseDecl() expands the declaration
+// to the 'all' | string[] form that resolveSide() already understands. The same
+// logic exists in perk-sheet-generator.js and build-sheet-generator.js (each
+// tool is a standalone package with no shared module), so keep them in sync.
+const UNIVERSE_FILE_KEYS = ['name', 'description', 'killer', 'survivor'];
+const universeFileCache = new Map(); // absolute file path -> { killer, survivor }
+
+/**
+ * Directory holding universe files: the explicit --universes-dir, else the nearest
+ * `universes/` directory found walking up from the build YAML's directory.
+ * Returns null when none exists.
+ */
+function findUniversesDir(explicitDir, filePath) {
+    if (explicitDir) return path.resolve(explicitDir);
+    let dir = path.dirname(path.resolve(filePath));
+    for (;;) {
+        const candidate = path.join(dir, 'universes');
+        try {
+            if (fs.statSync(candidate).isDirectory()) return candidate;
+        } catch (e) { /* not here, keep walking */ }
+        const parent = path.dirname(dir);
+        if (parent === dir) return null;
+        dir = parent;
+    }
+}
+
+/**
+ * Load + validate one universe file. Returns { killer, survivor }, each 'all' or an
+ * array of canonical perk names (validated against that side, duplicates rejected).
+ */
+function loadUniverseFile(universeFile) {
+    if (universeFileCache.has(universeFile)) return universeFileCache.get(universeFile);
+
+    let raw;
+    try {
+        raw = fs.readFileSync(universeFile, 'utf8');
+    } catch (e) {
+        fatal(`Cannot read universe file "${universeFile}": ${e.message}`);
+    }
+    let doc;
+    try {
+        doc = yaml.load(raw);
+    } catch (e) {
+        fatal(`YAML parse error in universe file "${universeFile}": ${e.message}`);
+    }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+        fatal(`Universe file "${universeFile}" does not contain a YAML object.`);
+    }
+    for (const key of Object.keys(doc)) {
+        if (!UNIVERSE_FILE_KEYS.includes(key)) {
+            fatal(
+                `Unknown key "${key}" in universe file "${universeFile}". ` +
+                `Allowed keys: ${UNIVERSE_FILE_KEYS.join(', ')}.`
+            );
+        }
+    }
+
+    const result = {};
+    for (const side of ['killer', 'survivor']) {
+        const isSurvivor = side === 'survivor';
+        const value = doc[side];
+        if (value === undefined || value === 'all') {
+            result[side] = 'all';
+            continue;
+        }
+        if (!Array.isArray(value) || value.length === 0) {
+            fatal(
+                `"${side}" in universe file "${universeFile}" must be "all" or a non-empty ` +
+                `list of perk names.`
+            );
+        }
+        const lookup = buildPerkLookup(allPerks.filter(p => p.survivorPerk === isSurvivor));
+        const seen = new Map(); // perk id -> name as first written
+        const names = [];
+        for (const entry of value) {
+            if (typeof entry !== 'string') {
+                let hint = '';
+                const keys = entry && typeof entry === 'object' ? Object.keys(entry) : [];
+                if (!Array.isArray(entry) && keys.length === 1) {
+                    hint = ` If this is a perk name containing a colon, wrap it in quotes ` +
+                        `(e.g. "${keys[0]}: ${entry[keys[0]]}").`;
+                }
+                fatal(
+                    `Invalid ${side} entry ${JSON.stringify(entry)} in universe file ` +
+                    `"${universeFile}": perk names must be strings.${hint}`
+                );
+            }
+            const perk = lookup.get(normalize(entry));
+            if (!perk) {
+                fatal(`Unknown ${side} perk "${entry}" in universe file "${universeFile}".`);
+            }
+            if (seen.has(perk.id)) {
+                fatal(
+                    `Duplicate ${side} perk "${entry}" in universe file "${universeFile}" ` +
+                    `(already listed as "${seen.get(perk.id)}").`
+                );
+            }
+            seen.set(perk.id, entry);
+            names.push(perk.name);
+        }
+        result[side] = names;
+    }
+
+    universeFileCache.set(universeFile, result);
+    return result;
+}
+
+/**
+ * Expand a build YAML's `universe:` declaration for one side into 'all' | string[].
+ * decl: undefined (=> all) | universe id (both sides) | { killer?, survivor? } where each
+ * side is 'all', a universe id, or an inline list of perk names. `all` is reserved.
+ * @param {string|null} universesDir - explicit --universes-dir, or null to auto-discover
+ */
+function resolveUniverseDecl(decl, isSurvivor, filePath, universesDir) {
+    const side = isSurvivor ? 'survivor' : 'killer';
+    let sideDecl;
+    if (decl === undefined || decl === null) {
+        return 'all';
+    } else if (typeof decl === 'string') {
+        sideDecl = decl;
+    } else if (typeof decl === 'object' && !Array.isArray(decl)) {
+        for (const key of Object.keys(decl)) {
+            if (key !== 'killer' && key !== 'survivor') {
+                fatal(
+                    `Unknown key "${key}" in "universe" in file "${filePath}". ` +
+                    `Allowed keys: killer, survivor.`
+                );
+            }
+        }
+        sideDecl = decl[side];
+        if (sideDecl === undefined || sideDecl === null) return 'all';
+    } else {
+        fatal(`Invalid universe declaration in file "${filePath}".`);
+    }
+
+    if (sideDecl === 'all' || Array.isArray(sideDecl)) return sideDecl;
+    if (typeof sideDecl !== 'string') {
+        fatal(`Invalid ${side} universe declaration in file "${filePath}".`);
+    }
+
+    const dir = findUniversesDir(universesDir, filePath);
+    if (!dir) {
+        fatal(
+            `Universe "${sideDecl}" is used in file "${filePath}" but no "universes" directory ` +
+            `was found above it. Pass --universes-dir <path>.`
+        );
+    }
+    let ids = [];
+    try {
+        ids = fs.readdirSync(dir)
+            .filter(f => f.endsWith('.yaml'))
+            .map(f => f.slice(0, -'.yaml'.length))
+            .filter(id => id !== 'all')
+            .sort();
+    } catch (e) {
+        fatal(`Cannot read universes directory "${dir}": ${e.message}`);
+    }
+    if (!ids.includes(sideDecl)) {
+        fatal(
+            `Unknown universe "${sideDecl}" in file "${filePath}". ` +
+            `Available universes in "${dir}": ${ids.length ? ids.join(', ') : '(none)'}.`
+        );
+    }
+    return loadUniverseFile(path.join(dir, `${sideDecl}.yaml`))[side];
+}
+
+// ---------------------------------------------------------------------------
 // Perk resolution
 // ---------------------------------------------------------------------------
 /**
  * Resolve allowed perks for one side.
  * @param {Object} sideConfig - { default, allow, deny } from YAML
- * @param {Array|string} universeDecl - explicit universe declaration or 'all'
+ * @param {Array|string} universeDecl - 'all' or an explicit perk-name list (see resolveUniverseDecl)
  * @param {boolean} isSurvivor - true for survivor-side
  * @param {string} filePath - for error messages
  * @returns {Array} array of allowed perk objects, sorted by name
@@ -295,6 +479,8 @@ function resolveSide(sideConfig, universeDecl, isSurvivor, filePath) {
 
     // Build a lookup for this side's universe
     const lookup = buildPerkLookup(universe);
+    // Only when narrowed: lets matchSelector tell "outside the universe" from "unknown"
+    const sideLookup = universe === sideAll ? null : buildPerkLookup(sideAll);
 
     // 2. Seed from default
     const defaultVal = (sideConfig && sideConfig.default) || 'allow';
@@ -310,14 +496,14 @@ function resolveSide(sideConfig, universeDecl, isSurvivor, filePath) {
     // 3. Apply deny selectors
     const denyList = (sideConfig && sideConfig.deny) || [];
     for (const sel of denyList) {
-        const matched = matchSelector(sel, universe, lookup, filePath);
+        const matched = matchSelector(sel, universe, lookup, filePath, sideLookup);
         for (const p of matched) allowed.delete(p.id);
     }
 
     // 4. Apply allow selectors (allow wins on conflict; intersected with universe)
     const allowList = (sideConfig && sideConfig.allow) || [];
     for (const sel of allowList) {
-        const matched = matchSelector(sel, universe, lookup, filePath);
+        const matched = matchSelector(sel, universe, lookup, filePath, sideLookup);
         for (const p of matched) allowed.set(p.id, p);
     }
 
@@ -1519,7 +1705,7 @@ function buildPreset(results, name, balancing, generatedISO) {
 // ---------------------------------------------------------------------------
 // Main processing
 // ---------------------------------------------------------------------------
-async function processFile(filePath, columns) {
+async function processFile(filePath, columns, universesDir) {
     let raw;
     try {
         raw = fs.readFileSync(filePath, 'utf8');
@@ -1553,8 +1739,8 @@ async function processFile(filePath, columns) {
     const balancing = (doc.balancing == null) ? '' : String(doc.balancing).trim();
 
     // Universe declarations
-    const universeKiller   = doc.universe && doc.universe.killer   !== undefined ? doc.universe.killer   : 'all';
-    const universeSurvivor = doc.universe && doc.universe.survivor !== undefined ? doc.universe.survivor : 'all';
+    const universeKiller   = resolveUniverseDecl(doc.universe, false, filePath, universesDir);
+    const universeSurvivor = resolveUniverseDecl(doc.universe, true,  filePath, universesDir);
 
     // Resolve both sides
     const allowedKiller   = resolveSide(doc.killerPerks,   universeKiller,   false, filePath);
@@ -1586,7 +1772,8 @@ async function main() {
         console.log(
             'Usage: node perk-sheet-generator.js <file.yaml...>\n' +
             '       [--asset-root <dir>] [--out <dir>] [--columns <n>]\n' +
-            '       [--preset <out.json>] [--name "<name>"] [--icons-only]'
+            '       [--preset <out.json>] [--name "<name>"] [--icons-only]\n' +
+            '       [--universes-dir <dir>]'
         );
         process.exit(0);
     }
@@ -1603,7 +1790,7 @@ async function main() {
 
     for (const filePath of args.files) {
         const absPath = path.resolve(filePath);
-        const result = await processFile(absPath, args.columns);
+        const result = await processFile(absPath, args.columns, args.universesDir);
         const { killer, allowedKiller, allowedSurvivor, balancing, survivorBuckets, killerBuckets } = result;
 
         const outDir = outDirOverride || path.dirname(absPath);

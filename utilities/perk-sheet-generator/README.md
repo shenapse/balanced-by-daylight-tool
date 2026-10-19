@@ -28,6 +28,9 @@ node utilities/perk-sheet-generator/perk-sheet-generator.js <file.yaml...>
      [--preset <path>]    Also compile a BbD preset JSON from all input files
      [--name "<name>"]    Preset Name field (default: "Generated Allow-List")
      [--icons-only]       Also write text-free, transparent icon-grid PNGs (see Output)
+     [--universes-dir <dir>]  Directory of universe files that `universe: <id>` resolves
+                          against (default: nearest `universes/` directory found walking
+                          up from each input file's directory)
 ```
 
 ## YAML schema
@@ -40,9 +43,10 @@ balancing: DBDLeague    # Optional. Label of the balancing ruleset these allow-l
 
 # Optional. Restricts which perks are considered for each side.
 # Default: every perk in dbdperks.json for that side.
-# universe:
-#   killer: all
-#   survivor: all   # or a list of perk names
+# universe: quartet-standard   # shorthand: id of a universe file, used for both sides
+# universe:                    # or per side; each is `all`, a universe id, or a list of perk names
+#   killer: quartet-standard   # -> the `killer` list of universes/quartet-standard.yaml
+#   survivor: all              # or an inline list: [Sprint Burst, Borrowed Time]
 
 killerPerks:
   default: allow        # allow | deny — applied to the whole killer-side universe
@@ -97,14 +101,56 @@ killerPickLimits:             # killer is one player → { max, perks } (no scop
 
 ## Resolution rules (applied independently per side)
 
-1. **Universe** `U` = explicit list (if `universe.<side>` is set and is not `"all"`),
-   else all perks in `dbdperks.json` whose `survivorPerk` matches the side.
+1. **Universe** `U` = the perks named by `universe` for that side (see
+   [Universe declaration](#universe-declaration)), else all perks in `dbdperks.json`
+   whose `survivorPerk` matches the side.
 2. **Seed**: `default: allow` → `allowed = U`; `default: deny` → `allowed = {}` (empty).
 3. Apply each `deny` selector → remove matched perks from `allowed`.
 4. Apply each `allow` selector → add matched perks (intersected with `U`) to `allowed`.
 
 **Precedence: `allow` is applied last and WINS on any conflict.**
 If a perk appears in both `deny` and `allow`, it ends up allowed.
+
+## Universe declaration
+
+`universe` is optional; omitted means `all` on both sides. It may be:
+
+- a **string id** (`universe: quartet-standard`): use that universe file for both sides;
+- a **map** `{ killer?, survivor? }`, where each side is `all`, a universe id, or an inline
+  list of perk names. An omitted side means `all`.
+
+A side set to an id uses that side of the file, so `universe: { killer: X }` takes
+`X.killer`. The word `all` is reserved and cannot be used as an id. Because `allow` and
+`deny` resolve inside the universe, an `allow` entry outside it is an "Unknown perk" error.
+
+### Universe files
+
+A universe id names the file `<universes-dir>/<id>.yaml` (kebab-case id, no extension in
+the reference). The directory is `--universes-dir`, otherwise the nearest `universes/`
+directory walking up from the input YAML's directory (in the dbd-arena-web repo that is
+`src/data/balancing/universes/`). If an id is used and no directory is found, or the id
+does not exist, the run fails (the latter lists the ids that do exist).
+
+```yaml
+# universes/quartet-standard.yaml
+name: Quartet standard pool    # optional label (unused by resolution)
+description: ...               # optional
+killer:                        # optional; omitted => all
+  - Agitation
+  - "Hex: Ruin"                # colon names must be quoted, as in build YAMLs
+survivor: all                  # `all` | non-empty list of perk names
+```
+
+- Allowed top-level keys: `name`, `description`, `killer`, `survivor`; anything else is an
+  error (catches typos).
+- `killer` / `survivor` each take `all` or a non-empty list of strings; a missing key
+  means `all`. Group selectors (`{ exhaustion: true }`) are not allowed here.
+- Names are matched with the same normalization and aliases as everywhere else, against
+  the perks of that side. An unknown name fails the run and names the file and side.
+- A perk listed twice (after normalization / alias lookup) is an error.
+
+The same `universe:` forms are honoured by `build-sheet-generator` for its `--rules` file
+(pass `--universes-dir` there too if auto-discovery from the rules file doesn't apply).
 
 ## Selectors
 
