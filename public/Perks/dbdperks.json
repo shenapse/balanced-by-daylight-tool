@@ -2866,5 +2866,14 @@
         "tags": [],
         "character": "The Slasher",
         "survivorPerk": false
+    },
+    {
+        "id": 312,
+        "name": "Lend a Hand",
+        "icon": "public/Perks/Survivors/Lend-a-Hand.webp",
+        "exhaustion": false,
+        "tags": [],
+        "character": "Shane Wiigwaas",
+        "survivorPerk": true
     }
 ]
