@@ -36,6 +36,8 @@ node utilities/build-sheet-generator/build-sheet-generator.js <file.yaml...>
                            env var, else searched for upwards from the script and cwd)
      [--out <dir>]         Output directory (default: next to each input file)
      [--rules <file.yaml>] Validate the builds against an allow-list YAML
+     [--universes-dir <dir>]  Universe files for the rules file's `universe: <id>`
+                           (default: nearest `universes/` directory above the rules file)
      [--icons-only]        Also write a text-free, transparent icon-strip PNG
      [--help | -h]         Print this usage and exit 0
 ```
@@ -110,7 +112,7 @@ for (const r of results) {
 
 - **`generateBuildSheets(options)` → `Promise<results[]>`** — the CLI's whole job. One
   result per input file, in order, each reported to `onResult` as it finishes.
-- **`loadBuildFile(path, { assetRoot, rulesPath })` → `model`** — parse, resolve and
+- **`loadBuildFile(path, { assetRoot, rulesPath, universesDir })` → `model`** — parse, resolve and
   validate one file **without rendering**, for a caller that only wants the resolved
   loadout or the violations and doesn't want to pay for a canvas.
 - **`resolveAssetRoot(explicit)` → `string`** — run the precedence above and return the

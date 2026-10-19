@@ -19,6 +19,7 @@
  * Usage:
  *   node utilities/build-sheet-generator/build-sheet-generator.js <file.yaml...>
  *        [--asset-root <dir>] [--out <dir>] [--rules <file.yaml>] [--icons-only]
+ *        [--universes-dir <dir>]
  *
  * Unlike its three siblings this file is BOTH the CLI and an importable module:
  * it is packaged (`dbd-build-sheet-generator`, bin `dbd-build-sheet`) so it can be
@@ -432,10 +433,20 @@ function rarityToIndex(names, value, filePath) {
 
 // --- Perk selector + allow-list resolution --------------------------------
 // Copied verbatim from perk-sheet-generator.js:216-325 (matchSelector / resolveSide).
-function matchSelector(selector, universe, lookup, filePath) {
+// sideLookup (optional): lookup over ALL perks of the side, passed only when the universe
+// is narrowed, so a real perk outside the universe gets its own error.
+function outsideUniverse(name, filePath) {
+    fatal(
+        `Perk "${name}" in file "${filePath}" is not in this build's perk universe. ` +
+        `Add it to the universe or remove it from allow/deny.`
+    );
+}
+
+function matchSelector(selector, universe, lookup, filePath, sideLookup) {
     if (typeof selector === 'string') {
         const norm = normalize(selector);
         const perk = lookup.get(norm);
+        if (!perk && sideLookup && sideLookup.has(norm)) outsideUniverse(selector, filePath);
         if (!perk) {
             fatal(
                 `Unknown perk name "${selector}" in file "${filePath}". ` +
@@ -466,6 +477,7 @@ function matchSelector(selector, universe, lookup, filePath) {
             if (perk) {
                 return [perk];
             }
+            if (sideLookup && sideLookup.has(norm)) outsideUniverse(reconstructed, filePath);
             fatal(
                 `Unknown perk name "${reconstructed}" in file "${filePath}". ` +
                 `No matching perk found on this side. ` +
@@ -479,6 +491,176 @@ function matchSelector(selector, universe, lookup, filePath) {
         );
     }
     fatal(`Invalid selector value ${JSON.stringify(selector)} in file "${filePath}".`);
+}
+
+// ---------------------------------------------------------------------------
+// Universe files (named, shared perk pools)
+// ---------------------------------------------------------------------------
+// `universe:` in a build YAML may name a universe file <universes-dir>/<id>.yaml
+// instead of inlining a perk list. resolveUniverseDecl() expands the declaration
+// to the 'all' | string[] form that resolveSide() already understands. The same
+// logic exists in perk-sheet-generator.js and build-sheet-generator.js (each
+// tool is a standalone package with no shared module), so keep them in sync.
+const UNIVERSE_FILE_KEYS = ['name', 'description', 'killer', 'survivor'];
+const universeFileCache = new Map(); // absolute file path -> { killer, survivor }
+
+/**
+ * Directory holding universe files: the explicit --universes-dir, else the nearest
+ * `universes/` directory found walking up from the build YAML's directory.
+ * Returns null when none exists.
+ */
+function findUniversesDir(explicitDir, filePath) {
+    if (explicitDir) return path.resolve(explicitDir);
+    let dir = path.dirname(path.resolve(filePath));
+    for (;;) {
+        const candidate = path.join(dir, 'universes');
+        try {
+            if (fs.statSync(candidate).isDirectory()) return candidate;
+        } catch (e) { /* not here, keep walking */ }
+        const parent = path.dirname(dir);
+        if (parent === dir) return null;
+        dir = parent;
+    }
+}
+
+/**
+ * Load + validate one universe file. Returns { killer, survivor }, each 'all' or an
+ * array of canonical perk names (validated against that side, duplicates rejected).
+ */
+function loadUniverseFile(universeFile) {
+    if (universeFileCache.has(universeFile)) return universeFileCache.get(universeFile);
+
+    let raw;
+    try {
+        raw = fs.readFileSync(universeFile, 'utf8');
+    } catch (e) {
+        fatal(`Cannot read universe file "${universeFile}": ${e.message}`);
+    }
+    let doc;
+    try {
+        doc = yaml.load(raw);
+    } catch (e) {
+        fatal(`YAML parse error in universe file "${universeFile}": ${e.message}`);
+    }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+        fatal(`Universe file "${universeFile}" does not contain a YAML object.`);
+    }
+    for (const key of Object.keys(doc)) {
+        if (!UNIVERSE_FILE_KEYS.includes(key)) {
+            fatal(
+                `Unknown key "${key}" in universe file "${universeFile}". ` +
+                `Allowed keys: ${UNIVERSE_FILE_KEYS.join(', ')}.`
+            );
+        }
+    }
+
+    const result = {};
+    for (const side of ['killer', 'survivor']) {
+        const isSurvivor = side === 'survivor';
+        const value = doc[side];
+        if (value === undefined || value === 'all') {
+            result[side] = 'all';
+            continue;
+        }
+        if (!Array.isArray(value) || value.length === 0) {
+            fatal(
+                `"${side}" in universe file "${universeFile}" must be "all" or a non-empty ` +
+                `list of perk names.`
+            );
+        }
+        const lookup = buildPerkLookup(allPerks.filter(p => p.survivorPerk === isSurvivor));
+        const seen = new Map(); // perk id -> name as first written
+        const names = [];
+        for (const entry of value) {
+            if (typeof entry !== 'string') {
+                let hint = '';
+                const keys = entry && typeof entry === 'object' ? Object.keys(entry) : [];
+                if (!Array.isArray(entry) && keys.length === 1) {
+                    hint = ` If this is a perk name containing a colon, wrap it in quotes ` +
+                        `(e.g. "${keys[0]}: ${entry[keys[0]]}").`;
+                }
+                fatal(
+                    `Invalid ${side} entry ${JSON.stringify(entry)} in universe file ` +
+                    `"${universeFile}": perk names must be strings.${hint}`
+                );
+            }
+            const perk = lookup.get(normalize(entry));
+            if (!perk) {
+                fatal(`Unknown ${side} perk "${entry}" in universe file "${universeFile}".`);
+            }
+            if (seen.has(perk.id)) {
+                fatal(
+                    `Duplicate ${side} perk "${entry}" in universe file "${universeFile}" ` +
+                    `(already listed as "${seen.get(perk.id)}").`
+                );
+            }
+            seen.set(perk.id, entry);
+            names.push(perk.name);
+        }
+        result[side] = names;
+    }
+
+    universeFileCache.set(universeFile, result);
+    return result;
+}
+
+/**
+ * Expand a build YAML's `universe:` declaration for one side into 'all' | string[].
+ * decl: undefined (=> all) | universe id (both sides) | { killer?, survivor? } where each
+ * side is 'all', a universe id, or an inline list of perk names. `all` is reserved.
+ * @param {string|null} universesDir - explicit --universes-dir, or null to auto-discover
+ */
+function resolveUniverseDecl(decl, isSurvivor, filePath, universesDir) {
+    const side = isSurvivor ? 'survivor' : 'killer';
+    let sideDecl;
+    if (decl === undefined || decl === null) {
+        return 'all';
+    } else if (typeof decl === 'string') {
+        sideDecl = decl;
+    } else if (typeof decl === 'object' && !Array.isArray(decl)) {
+        for (const key of Object.keys(decl)) {
+            if (key !== 'killer' && key !== 'survivor') {
+                fatal(
+                    `Unknown key "${key}" in "universe" in file "${filePath}". ` +
+                    `Allowed keys: killer, survivor.`
+                );
+            }
+        }
+        sideDecl = decl[side];
+        if (sideDecl === undefined || sideDecl === null) return 'all';
+    } else {
+        fatal(`Invalid universe declaration in file "${filePath}".`);
+    }
+
+    if (sideDecl === 'all' || Array.isArray(sideDecl)) return sideDecl;
+    if (typeof sideDecl !== 'string') {
+        fatal(`Invalid ${side} universe declaration in file "${filePath}".`);
+    }
+
+    const dir = findUniversesDir(universesDir, filePath);
+    if (!dir) {
+        fatal(
+            `Universe "${sideDecl}" is used in file "${filePath}" but no "universes" directory ` +
+            `was found above it. Pass --universes-dir <path>.`
+        );
+    }
+    let ids = [];
+    try {
+        ids = fs.readdirSync(dir)
+            .filter(f => f.endsWith('.yaml'))
+            .map(f => f.slice(0, -'.yaml'.length))
+            .filter(id => id !== 'all')
+            .sort();
+    } catch (e) {
+        fatal(`Cannot read universes directory "${dir}": ${e.message}`);
+    }
+    if (!ids.includes(sideDecl)) {
+        fatal(
+            `Unknown universe "${sideDecl}" in file "${filePath}". ` +
+            `Available universes in "${dir}": ${ids.length ? ids.join(', ') : '(none)'}.`
+        );
+    }
+    return loadUniverseFile(path.join(dir, `${sideDecl}.yaml`))[side];
 }
 
 function resolveSide(sideConfig, universeDecl, isSurvivor, filePath) {
@@ -498,6 +680,7 @@ function resolveSide(sideConfig, universeDecl, isSurvivor, filePath) {
     }
 
     const lookup = buildPerkLookup(universe);
+    const sideLookup = universe === sideAll ? null : buildPerkLookup(sideAll);
 
     const defaultVal = (sideConfig && sideConfig.default) || 'allow';
     if (defaultVal !== 'allow' && defaultVal !== 'deny') {
@@ -510,13 +693,13 @@ function resolveSide(sideConfig, universeDecl, isSurvivor, filePath) {
 
     const denyList = (sideConfig && sideConfig.deny) || [];
     for (const sel of denyList) {
-        const matched = matchSelector(sel, universe, lookup, filePath);
+        const matched = matchSelector(sel, universe, lookup, filePath, sideLookup);
         for (const p of matched) allowed.delete(p.id);
     }
 
     const allowList = (sideConfig && sideConfig.allow) || [];
     for (const sel of allowList) {
-        const matched = matchSelector(sel, universe, lookup, filePath);
+        const matched = matchSelector(sel, universe, lookup, filePath, sideLookup);
         for (const p of matched) allowed.set(p.id, p);
     }
 
@@ -781,7 +964,7 @@ function resolveItemAllowList(cfg, universe, fallbackDefault, label, filePath) {
  * against each build model's killer in validateModel — see the doc comment there
  * for why a mismatch is fatal rather than silently skipped).
  */
-function loadRulesContext(rulesPath) {
+function loadRulesContext(rulesPath, universesDir = null) {
     const absRulesPath = path.resolve(rulesPath);
     let raw;
     try {
@@ -811,8 +994,10 @@ function loadRulesContext(rulesPath) {
     }
 
     // Perks (side-aware individual allow/deny + the single-build limit families).
-    const allowedKillerPerks   = resolveSide(doc.killerPerks, undefined, false, absRulesPath);
-    const allowedSurvivorPerks = resolveSide(doc.survivorPerks, undefined, true, absRulesPath);
+    const universeKiller   = resolveUniverseDecl(doc.universe, false, absRulesPath, universesDir);
+    const universeSurvivor = resolveUniverseDecl(doc.universe, true,  absRulesPath, universesDir);
+    const allowedKillerPerks   = resolveSide(doc.killerPerks, universeKiller, false, absRulesPath);
+    const allowedSurvivorPerks = resolveSide(doc.survivorPerks, universeSurvivor, true, absRulesPath);
     const allowedKillerPerkIds   = new Set(allowedKillerPerks.map(p => p.id));
     const allowedSurvivorPerkIds = new Set(allowedSurvivorPerks.map(p => p.id));
 
@@ -901,6 +1086,7 @@ function parseArgs(argv) {
         assetRoot: null,
         outDir: null,
         rulesPath: null,
+        universesDir: null,
         iconsOnly: false,
         help: false,
     };
@@ -913,6 +1099,10 @@ function parseArgs(argv) {
             // Path to an allow-list YAML; validated against every rendered build
             // by loadRulesContext() / validateModel() (see generateBuildSheets()).
             args.rulesPath = argv[++i];
+        } else if (a === '--universes-dir' && argv[i + 1]) {
+            // Directory of universe files that the --rules file's `universe:` ids
+            // resolve against (default: nearest `universes/` above the rules file).
+            args.universesDir = argv[++i];
         } else if (a === '--asset-root' && argv[i + 1]) {
             // A real option, unlike in the three sibling generators: they peek at
             // process.argv with a readOption() call above their path constants,
@@ -1979,6 +2169,9 @@ async function renderIconSheet(model, outDir) {
  *                                       input file.
  * @param {string}   [options.rulesPath] Allow-list YAML to validate the builds
  *                                       against.
+ * @param {string}   [options.universesDir] Directory of universe files for the rules
+ *                                       file's `universe:` ids; default is the nearest
+ *                                       `universes/` directory above the rules file.
  * @param {boolean}  [options.iconsOnly] Also write the text-free, transparent
  *                                       icon-strip variant of each sheet.
  * @param {function} [options.onResult]  Called with each result as that file
@@ -1996,6 +2189,7 @@ async function generateBuildSheets(options = {}) {
         assetRoot = null,
         outDir = null,
         rulesPath = null,
+        universesDir = null,
         iconsOnly = false,
         onResult = null,
     } = options;
@@ -2008,7 +2202,7 @@ async function generateBuildSheets(options = {}) {
 
     // Parsed once and reused across every input file — perks/items/killer-addon
     // pools don't depend on which build file is being checked.
-    const rulesCtx = rulesPath ? loadRulesContext(rulesPath) : null;
+    const rulesCtx = rulesPath ? loadRulesContext(rulesPath, universesDir) : null;
 
     const outDirOverride = outDir ? path.resolve(outDir) : null;
 
@@ -2063,14 +2257,14 @@ async function generateBuildSheets(options = {}) {
  * error, exactly as generateBuildSheets would.
  */
 function loadBuildFile(filePath, options = {}) {
-    const { assetRoot = null, rulesPath = null } = options;
+    const { assetRoot = null, rulesPath = null, universesDir = null } = options;
 
     initialize(assetRoot);
 
     const model = processFile(path.resolve(filePath));
     if (rulesPath) {
         model.rulesPath = rulesPath;
-        model.violations = validateModel(model, loadRulesContext(rulesPath));
+        model.violations = validateModel(model, loadRulesContext(rulesPath, universesDir));
     } else {
         model.violations = null;
     }
@@ -2087,6 +2281,8 @@ const USAGE =
     '                             for upwards from this script and the working dir)\n' +
     '       [--out <dir>]         output directory (default: next to each input file)\n' +
     '       [--rules <file.yaml>] validate the builds against an allow-list YAML\n' +
+    '       [--universes-dir <dir>] universe files for the rules file\'s `universe:` ids\n' +
+    '                             (default: nearest universes/ directory above it)\n' +
     '       [--icons-only]        also write a text-free, transparent icon-strip PNG';
 
 /** The per-file stdout block. `violations` is null unless --rules was passed. */
@@ -2123,6 +2319,7 @@ async function runCli(argv = process.argv.slice(2)) {
         assetRoot: args.assetRoot,
         outDir: args.outDir,
         rulesPath: args.rulesPath,
+        universesDir: args.universesDir,
         iconsOnly: args.iconsOnly,
         onResult: result => console.log(formatResult(result)),
     });
